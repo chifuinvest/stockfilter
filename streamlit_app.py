@@ -295,7 +295,17 @@ if _BACKEND_OK:
     if running and total > 0:
         pct = max(0.0, min(1.0, (done / total) if total else 0.0))
         progress_placeholder.progress(pct, text=f"评分中：{done}/{total} 只 （成功 {ok} / 失败 {fail}）")
-        status_text.caption(f"⏳ 评分任务进行中，稍后页面自动会刷新，也可以手动点侧边栏「📥 读取缓存」看最新结果。")
+        wait_msg = str(prog.get("wait_msg") or "").strip()
+        wait_rem = int(prog.get("wait_remaining_seconds") or 0)
+        base_msg = "⏳ 评分任务进行中，稍后页面自动会刷新，也可以手动点侧边栏「📥 读取缓存」看最新结果。"
+        if wait_msg:
+            status_text.caption(
+                f"{base_msg}\n\n"
+                f"⌛ 正在等待：**{wait_msg}**，剩余约 **{wait_rem}** 秒。"
+                f"  *这不是卡死，是接口配额/限流等待，请耐心等待。*"
+            )
+        else:
+            status_text.caption(base_msg)
     else:
         progress_placeholder.progress(1.0, text="✅ 评分任务已就绪（读缓存）")
 

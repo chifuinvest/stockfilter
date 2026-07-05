@@ -15,6 +15,7 @@ import json
 import time
 import pickle
 import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
@@ -151,10 +152,15 @@ def _write_score_cache(data: Dict[str, Any]) -> None:
 
 # ===================== 核心评分调度 =====================
 
-def _progress_cb(done, total, ok, fail):
+def _progress_cb(done, total, ok, fail, wait_msg: Optional[str] = None, wait_remaining_seconds: int = 0):
+    """更新进度状态；可选 wait_msg 用于长等待时的提示（如港股配额/Yahoo 退避），让用户知道没卡死"""
     global _last_progress
     with _lock:
-        _last_progress = {"running": True, "done": done, "total": total, "ok": ok, "fail": fail}
+        payload = {"running": True, "done": done, "total": total, "ok": ok, "fail": fail}
+        if wait_msg:
+            payload["wait_msg"] = wait_msg
+            payload["wait_remaining_seconds"] = int(max(0, wait_remaining_seconds))
+        _last_progress = payload
 
 
 def run_scoring(force_refresh: bool = False, use_thread: bool = True) -> Dict[str, Any]:
@@ -213,36 +219,58 @@ def _do_run_scoring(force_refresh: bool) -> Dict[str, Any]:
         with _lock:
             _last_result = payload
 
-    for idx, meta in enumerate(flat, start=1):
-        code = meta["code"]
-        try:
-            df = fetch_single_price(code, force_refresh=force_refresh)
-            scored = None
-            if df is not None:
-                scored = score_single(df)
-            if scored is not None:
-                record = {
-                    "market": meta.get("market", ""),
-                    "market_label": _MARKET_LABEL.get(meta.get("market", ""), meta.get("market", "")),
-                    "code": code,
-                    "name": meta.get("name", code),
-                    "sector": meta.get("sector", "其他"),
-                    **scored,
-                }
-                results.append(record)
-                ok += 1
-            else:
-                fail += 1
-        except Exception as e:
-            logger.exception(f"评分异常 {code}: {e}")
-            fail += 1
-        finally:
+    # ===== 单票超时保护：60 秒内必须完成 fetch+score，否则直接标记失败，避免单只股票卡死导致整个任务停在原地（用户反馈：11/157 卡住不再动） =====
+    _SINGLE_TICKET_TIMEOUT_SECONDS = 60
+    # 提供给 data_fetcher_v2 长 sleep（港股配额等待等）时调用的全局进度通知
+    import data_fetcher_v2 as _dfv2
+    if not getattr(_dfv2, "_progress_wait_hook", None):
+        def _hook(msg, remaining):
+            _progress_cb(max(0, idx-1), N, ok, fail, wait_msg=msg, wait_remaining_seconds=int(remaining))
+        _dfv2._progress_wait_hook = _hook
+
+    def _process_one(meta_dict):
+        """单线程内处理 1 只股票：fetch → 评分 → 返回结果。被 ThreadPoolExecutor 包装加 60s 总超时。"""
+        code_one = meta_dict["code"]
+        mkt = meta_dict.get("market", "")
+        df_one = fetch_single_price(code_one, force_refresh=force_refresh)
+        scored_one = None
+        if df_one is not None:
+            scored_one = score_single(df_one)
+        return scored_one, mkt, meta_dict
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="score_worker") as pool:
+        for idx, meta in enumerate(flat, start=1):
+            code = meta["code"]
             try:
-                with _lock:
-                    _last_progress = {"running": True, "done": idx, "total": N, "ok": ok, "fail": fail}
-                _flush_partial()
-            except Exception as fe:
-                logger.warning(f"进度/缓存写入异常({code}): {fe}")
+                future = pool.submit(_process_one, meta)
+                # 单票 60 秒硬超时：超过则取消，标记失败，直接下一只，绝对不卡
+                scored, _, _meta = future.result(timeout=_SINGLE_TICKET_TIMEOUT_SECONDS)
+                if scored is not None:
+                    record = {
+                        "market": _meta.get("market", ""),
+                        "market_label": _MARKET_LABEL.get(_meta.get("market", ""), _meta.get("market", "")),
+                        "code": code,
+                        "name": _meta.get("name", code),
+                        "sector": _meta.get("sector", "其他"),
+                        **scored,
+                    }
+                    results.append(record)
+                    ok += 1
+                else:
+                    fail += 1
+            except FuturesTimeoutError:
+                logger.warning(f"单票超时({_SINGLE_TICKET_TIMEOUT_SECONDS}s)，标记失败并跳过：{code}")
+                fail += 1
+            except Exception as e:
+                logger.exception(f"评分异常 {code}: {e}")
+                fail += 1
+            finally:
+                try:
+                    with _lock:
+                        _last_progress = {"running": True, "done": idx, "total": N, "ok": ok, "fail": fail}
+                    _flush_partial()
+                except Exception as fe:
+                    logger.warning(f"进度/缓存写入异常({code}): {fe}")
 
     sorted_results = sorted(results, key=lambda r: (r.get("total_score", -1) or -1), reverse=True)
     stats = _calc_stats(sorted_results)

@@ -110,6 +110,33 @@ _YF_BACKOFF_LEVEL = [0]
 _YF_BACKOFF_SECONDS = [300, 600, 1200, 2400]
 import random as _yf_rnd
 
+# 进度通知 hook：被 scoring_scheduler 注入 _progress_wait_hook(msg, remaining_seconds)
+# 用于长等待（港股配额/Yahoo退避）时在 UI 上显示「剩余 X 秒」提示，让用户知道没卡死
+_progress_wait_hook = None
+
+
+def _notify_wait(msg: str, total_seconds: int, tick_seconds: int = 2) -> None:
+    """把一次长 sleep 拆成 tick_seconds 小循环，每轮调用 wait hook 更新 UI 进度提示。"""
+    import time as _t
+    remaining = int(max(0, total_seconds))
+    while remaining > 0:
+        step = min(tick_seconds, remaining)
+        try:
+            if _progress_wait_hook is not None:
+                try:
+                    _progress_wait_hook(msg, remaining)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        _t.sleep(step)
+        remaining -= step
+    try:
+        if _progress_wait_hook is not None:
+            _progress_wait_hook(msg, 0)
+    except Exception:
+        pass
+
 # ============ Tushare (A/H 股首选) ============
 _TS_OK = False
 _ts_pro = None
@@ -274,15 +301,15 @@ def _fetch_via_tushare(yf_code: str, days_back: int) -> Optional[pd.DataFrame]:
     for attempt, delay in enumerate(delays, start=1):
         try:
             if market == "CN":
-                daily_df = _ts_pro.daily(ts_code=ts_code, start_date=sd, end_date=ed)
+                daily_df = _ts_pro.daily(ts_code=ts_code, start_date=sd, end_date=ed, timeout=15)
                 if not isinstance(daily_df, pd.DataFrame) or len(daily_df) == 0:
                     raise ValueError(f"Tushare daily 空数据: {ts_code}")
                 try:
-                    adj_df = _ts_pro.adj_factor(ts_code=ts_code, start_date=sd, end_date=ed)
+                    adj_df = _ts_pro.adj_factor(ts_code=ts_code, start_date=sd, end_date=ed, timeout=15)
                 except Exception:
                     adj_df = None
             else:
-                daily_df = _ts_pro.hk_daily(ts_code=ts_code, start_date=sd, end_date=ed)
+                daily_df = _ts_pro.hk_daily(ts_code=ts_code, start_date=sd, end_date=ed, timeout=15)
                 if not isinstance(daily_df, pd.DataFrame) or len(daily_df) == 0:
                     raise ValueError(f"Tushare hk_daily 空数据: {ts_code}")
             break
@@ -292,10 +319,15 @@ def _fetch_via_tushare(yf_code: str, days_back: int) -> Optional[pd.DataFrame]:
             msg = str(e)
             if market == "HK" and ("1次/分钟" in msg or "频率超限" in msg):
                 # 命中分钟级配额限制 → 强制 sleep 65 秒等窗口重置
+                # 拆成 2 秒小循环，UI 上显示剩余秒数，让用户知道没卡死
                 logger.info(f"[Tushare HK] {yf_code} 命中分钟级频率限制，sleep 65s 等待下一个窗口...")
-                time.sleep(65)
+                _notify_wait("Tushare 港股接口配额等待（1次/分钟）", 65, tick_seconds=2)
             elif attempt < len(delays):
-                time.sleep(delay)
+                # 港股 delays 列表里可能是 65s 配额等待（非频率超限触发时），也拆成小循环显示剩余秒
+                if delay >= 30:
+                    _notify_wait(f"Tushare 重试等待（第 {attempt}/{len(delays)} 次）", delay, tick_seconds=2)
+                else:
+                    time.sleep(delay)
 
     if daily_df is None or len(daily_df) < 60:
         if last_err:
@@ -414,7 +446,8 @@ def fetch_single_price(yf_code: str, force_refresh: bool = False) -> Optional[pd
             ticker = yf.Ticker(yf_code)
             hist = ticker.history(start=start_date.strftime("%Y-%m-%d"),
                                   end=end_date.strftime("%Y-%m-%d"),
-                                  auto_adjust=False, actions=False)
+                                  auto_adjust=False, actions=False,
+                                  timeout=15)
             if hist is None or len(hist) == 0:
                 raise ValueError(f"yfinance 返回空数据: {yf_code}")
             df = hist.copy()
