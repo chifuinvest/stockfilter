@@ -306,25 +306,27 @@ summary = _summary_by_signal(results)
 scores = [float(r.get("total_score") or 0) for r in results if isinstance(r.get("total_score"), (int, float))]
 avg_score = round(sum(scores) / len(scores), 2) if scores else 0.0
 
-col1, col2, col3, col4, col5, col6, col7 = st.columns(7, gap="small")
-with col1:
-    st.metric(label="✅ 已评分 / 总数", value=f"{scored_count} / {pool_size}", delta=f"{'已缓存' if from_cache else '实时拉取'}")
-with col2:
-    st.metric(label=SIGNAL_LABEL["BUY"], value=summary["BUY"])
-with col3:
-    st.metric(label=SIGNAL_LABEL["HOLD"], value=summary["HOLD"])
-with col4:
-    st.metric(label=SIGNAL_LABEL["WATCH"], value=summary["WATCH"])
-with col5:
-    st.metric(label=SIGNAL_LABEL["REDUCE"], value=summary["REDUCE"])
-with col6:
-    st.metric(label=SIGNAL_LABEL["AVOID"], value=summary["AVOID"])
-with col7:
-    st.metric(label="📊 平均得分", value=f"{avg_score}", delta="0~100 分")
+# 只有当有评分结果（哪怕只是部分）时才显示 KPI 卡片，避免 7 个全 0/0 空卡片
+if scored_count > 0 or pool_size > 0 or bool(results):
+    col1, col2, col3, col4, col5, col6, col7 = st.columns(7, gap="small")
+    with col1:
+        st.metric(label="✅ 已评分 / 总数", value=f"{scored_count} / {pool_size}", delta=f"{'已缓存' if from_cache else '实时拉取'}")
+    with col2:
+        st.metric(label=SIGNAL_LABEL["BUY"], value=summary["BUY"])
+    with col3:
+        st.metric(label=SIGNAL_LABEL["HOLD"], value=summary["HOLD"])
+    with col4:
+        st.metric(label=SIGNAL_LABEL["WATCH"], value=summary["WATCH"])
+    with col5:
+        st.metric(label=SIGNAL_LABEL["REDUCE"], value=summary["REDUCE"])
+    with col6:
+        st.metric(label=SIGNAL_LABEL["AVOID"], value=summary["AVOID"])
+    with col7:
+        st.metric(label="📊 平均得分", value=f"{avg_score}", delta="0~100 分")
 
-if updated_at:
-    st.caption(f"🕒 最近一次完整评分时间：{updated_at}")
-st.divider()
+    if updated_at:
+        st.caption(f"🕒 最近一次完整评分时间：{updated_at}")
+    st.divider()
 
 # -----------------------------------------------------------------------------
 # 5.3 信号筛选 + 表格展示
