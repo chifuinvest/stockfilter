@@ -6,16 +6,18 @@
 
 ## 🌟 方案 A · 一键点按钮上线（90% 用户选这个）
 
-> 前置条件：先把代码 push 到 GitHub（本仓库已完成【步骤 0️⃣】推完后，把下面模板 URL 里的 `<YOUR_GITHUB_USERNAME>` 替换成你自己的 GitHub 用户名，粘贴到浏览器地址栏，回车即可。
+> 前置条件：先把代码 push 到 GitHub（【步骤 0️⃣】完成后，仓库必须**非空**，否则 Railway 找不到代码 → 会 404！）
+>
+> 把下面模板 URL 里的 `<YOUR_GITHUB_USERNAME>` 替换成你自己的 GitHub 用户名，**整个 URL 复制到浏览器地址栏**（注意是 /new?template= 开头），回车即可：
 
 ```text
-https://railway.app/template/new?template=https%3A%2F%2Fgithub.com%2F<YOUR_GITHUB_USERNAME>%2Fstockfilter%2Ftree%2Fmain&envs=TUSHARE_TOKEN,PYTHONUNBUFFERED,HOME,TZ&envDescription=Tushare%E4%B8%8E%E7%B3%BB%E7%BB%9F%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F%E8%AF%B4%E6%98%8E&envLink=https%3A%2F%2Fgithub.com%2F<YOUR_GITHUB_USERNAME>%2Fstockfilter%2Fblob%2Fmain%2F.env.example&referralCode=
+https://railway.app/new?template=https%3A%2F%2Fgithub.com%2F<YOUR_GITHUB_USERNAME>%2Fstockfilter&plugins=&envs=TUSHARE_TOKEN,PYTHONUNBUFFERED,HOME,TZ&envDescription=Tushare%E4%B8%8E%E7%B3%BB%E7%BB%9F%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F%E8%AF%B4%E6%98%8E&envLink=https%3A%2F%2Fgithub.com%2F<YOUR_GITHUB_USERNAME>%2Fstockfilter%2Fblob%2Fmain%2F.env.example
 ```
 
-举个例子，假如你的 GitHub 用户名是 `zhangsan`，直接打开下面这个链接：
+举个例子，你的 GitHub 用户名是 `chifuinvest`，**直接打开下面这个链接就能用**（复制粘贴到浏览器）：
 
 ```
-https://railway.app/template/new?template=https%3A%2F%2Fgithub.com%2Fzhangsan%2Fstockfilter%2Ftree%2Fmain&envs=TUSHARE_TOKEN,PYTHONUNBUFFERED,HOME,TZ&envDescription=Tushare%E4%B8%8E%E7%B3%BB%E7%BB%9F%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F%E8%AF%B4%E6%98%8E&envLink=https%3A%2F%2Fgithub.com%2Fzhangsan%2Fstockfilter%2Fblob%2Fmain%2F.env.example
+https://railway.app/new?template=https%3A%2F%2Fgithub.com%2Fchifuinvest%2Fstockfilter&plugins=&envs=TUSHARE_TOKEN,PYTHONUNBUFFERED,HOME,TZ&envDescription=Tushare%E4%B8%8E%E7%B3%BB%E7%BB%9F%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F%E8%AF%B4%E6%98%8E&envLink=https%3A%2F%2Fgithub.com%2Fchifuinvest%2Fstockfilter%2Fblob%2Fmain%2F.env.example
 ```
 
 点进去后：
