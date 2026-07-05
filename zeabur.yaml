@@ -1,0 +1,39 @@
+# Zeabur 部署配置文件（国内访问速度最快）
+# Zeabur 会自动识别此文件，按说明构建和启动
+# 文档：https://zeabur.com/docs/deploy/zeabur-yml
+
+name: ai-stock-monitor
+
+services:
+  - name: flask-app
+    type: web
+    # 优先用 Nixpacks（和 Railway 一致，自动识别 Procfile/requirements.txt）
+    buildCommand: ""
+    # 启动命令：gunicorn 多 Worker，$PORT 由 Zeabur 自动注入（不要硬写 5000）
+    startCommand: gunicorn main:app -b 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 300 --preload --access-logfile - --error-logfile -
+    # 健康检查路径（首页返回 200 即可）
+    healthCheck:
+      http:
+        path: /
+        interval: 30
+        timeout: 30
+        retries: 5
+    # 环境变量声明（名字先填好，部署时在 Zeabur 控制台填值即可）
+    env:
+      - key: TUSHARE_TOKEN
+        description: Tushare Token（A股/港股数据源，必填）
+        required: true
+      - key: PYTHONUNBUFFERED
+        description: 实时输出日志，便于排查部署问题
+        value: "1"
+      - key: HOME
+        description: Zeabur 容器用户目录（确保 Tushare/yfinance 写路径不崩）
+        value: "/app"
+      - key: TZ
+        description: 设定时区为东八区，日志/调度和国内一致
+        value: "Asia/Shanghai"
+    ports:
+      - type: HTTP
+        port: $PORT
+    # 免费层实例规格（512MB RAM，足够运行 pandas/numpy/Flask）
+    plan: 512Mi
