@@ -1,3 +1,0 @@
-# packages.txt: Streamlit Community Cloud 系统依赖（我们项目纯 Python，无需系统包）
-# 如果未来安装 TA-Lib 等需要系统库的包，在这里加一行一行的 apt 包名
-# 示例：libatlas-base-dev / libgfortran5 / default-libmysqlclient-dev
