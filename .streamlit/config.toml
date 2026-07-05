@@ -1,0 +1,35 @@
+# Streamlit 全局配置（AI 产业链量化监控系统）
+[server]
+# Streamlit 监听地址和端口（Community Cloud 会自动注入 $PORT，不用硬写）
+headless = true
+address = "0.0.0.0"
+# 上传文件大小限制（上传自定义股票池 CSV 用）
+maxUploadSize = 50
+# 文件监视（开发模式），部署后关闭
+fileWatcherType = "none"
+# 跨域（内嵌 iframe 用）
+enableCORS = false
+enableXsrfProtection = false
+
+[runner]
+# 魔法命令：st.rerun / st.stop 等正常工作
+magicEnabled = true
+fastReruns = true
+
+[theme]
+# 深色/浅色？默认浅色蓝色系，和我们 Flask 页面的 Bootstrap 蓝色保持一致
+base = "light"
+primaryColor = "#1F77B4"   # 经典 Bootstrap 蓝色
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F6FF"
+textColor = "#212529"
+font = "sans serif"
+
+[browser]
+# 页面标题和 favicon
+gatherUsageStats = false
+serverAddress = "localhost"
+
+[client]
+showErrorDetails = true
+toolbarMode = "minimal"
