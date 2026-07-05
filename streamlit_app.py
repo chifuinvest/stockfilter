@@ -482,6 +482,79 @@ if _BACKEND_OK:
         st.button("🔄 立即刷新诊断（重新扫所有缓存路径）", use_container_width=False)
 
 # -----------------------------------------------------------------------------
+# 失败清单展示（所有评分未成功的股票，按失败原因分组，显示给用户）
+# -----------------------------------------------------------------------------
+if _BACKEND_OK:
+    failures_list = data.get("failures") or []
+    fc = len(failures_list) if isinstance(failures_list, list) else 0
+    _label = "❌ 失败清单"
+    if fc > 0:
+        _label = f"❌ 失败清单（{fc} 只 · 含市场/代码/原因，点我展开）"
+    with st.expander(_label, expanded=(fc > 25)):
+        if fc == 0:
+            st.success("✅ 太棒了！目前没有失败的股票（如果你刚点击开始评分，失败清单会随着评分进展逐步更新）")
+        else:
+            import pandas as pd
+            fl = [dict(f) for f in failures_list if isinstance(f, dict)]
+            # 美化输出：市场标签替换
+            for _f in fl:
+                _mk = str(_f.get("market") or "")
+                _f["市场"] = MARKET_LABEL.get(_mk, _mk)
+            fdf = pd.DataFrame(fl)
+            col_order = [c for c in ["市场", "code", "name", "reason", "time"] if c in fdf.columns]
+            for c in ["market"]:
+                if c in fdf.columns and c not in col_order:
+                    col_order.append(c)
+            col_order = [c for c in col_order if c in fdf.columns]
+            if col_order:
+                fdf = fdf[col_order]
+            st.dataframe(
+                fdf,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "市场": st.column_config.Column("市场", width="small"),
+                    "code": st.column_config.Column("代码", width="small"),
+                    "name": st.column_config.Column("名称", width="medium"),
+                    "reason": st.column_config.Column("失败原因（关键！）", width="large"),
+                    "time": st.column_config.Column("时间", width="small"),
+                },
+                height=min(720, 120 + fc * 28),
+            )
+            # 失败原因分类统计
+            st.markdown("**📊 失败原因分类统计**（帮你快速判断根因）：")
+            def reason_bucket(r):
+                r = str(r or "").lower()
+                if "超时" in r or "timeout" in r:
+                    return "⏰ 单票超时（网络堵塞）"
+                if "429" in r or "限流" in r or "rate" in r or "频率超限" in r or "1次/分钟" in r:
+                    return "🚦 接口限流(Tushare/Yahoo 429)"
+                if "返回空数据" in r or "fetch返回空" in r:
+                    return "📭 返回空数据"
+                if "超" in r and "限" in r:
+                    return "🚦 Tushare每日配额超限"
+                if "nan" in r or "k线" in r or "K线" in r or "score_single返回none" in r:
+                    return "⚠️ K线数据异常(NaN/不足)"
+                if "异常:" in r or "exception" in r:
+                    return "🔥 代码异常/未预期错误"
+                return "❔ 其他: " + (str(r)[:16] if len(r) > 16 else r)
+            if "reason" in fdf.columns:
+                buckets = [reason_bucket(r) for r in fdf["reason"].tolist()]
+                from collections import Counter
+                bc = Counter(buckets)
+                bc_sorted = sorted(bc.items(), key=lambda x: x[1], reverse=True)
+                col1, col2 = st.columns(2)
+                for i, (k, v) in enumerate(bc_sorted):
+                    (col1 if i % 2 == 0 else col2).info(f"{k}：**{v} 只**")
+            st.caption(
+                "🔧 **常见失败对应解决办法**：\n"
+                "- 🚦 接口限流(Tushare/Yahoo)：等 30 分钟后点「强制重新评分」；或开 VPN 换出口 IP（尤其本地 Windows）\n"
+                "- ⏰ 单票超时：多是本地宽带访问海外 Yahoo 被墙/丢包，换网络、开全局代理，或直接用 Streamlit Cloud 版本更稳定\n"
+                "- 📭 返回空数据：检查股票代码映射（尤其韩股代码格式），或数据源暂时无该标的历史数据\n"
+                "- 🚦 Tushare配额超限：Tushare免费用户港股每日限 5 次，等 0 点后再跑；或付费升级额度"
+            )
+
+# -----------------------------------------------------------------------------
 # 5.3 信号筛选 + 表格展示
 # -----------------------------------------------------------------------------
 if not _BACKEND_OK:
