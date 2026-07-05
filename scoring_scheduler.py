@@ -132,7 +132,7 @@ _MARKET_LABEL = {
     "KR": "🇰🇷 韩股",
 }
 
-_lock = threading.Lock()
+_lock = threading.RLock()
 _last_result: Dict[str, Any] = {}
 _last_progress: Dict[str, Any] = {"running": False, "done": 0, "total": 0, "ok": 0, "fail": 0}
 
