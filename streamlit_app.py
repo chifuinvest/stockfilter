@@ -318,6 +318,30 @@ pool_size = int(data.get("pool_size", 0) or 0)
 scored_count = int(data.get("scored_count", 0) or 0)
 updated_at = str(data.get("updated_at") or "")
 from_cache = bool(data.get("from_cache", False))
+stale_recovered = bool(data.get("stale_recovered", False))
+
+# ---- 诊断：进度 vs 结果不一致时，给用户明确提示 ----
+if _BACKEND_OK:
+    _dbg_prog = sch.get_progress() or {}
+    _dbg_prog_ok = int(_dbg_prog.get("ok") or 0)
+    _dbg_delta = _dbg_prog_ok - scored_count
+else:
+    _dbg_prog_ok = 0
+    _dbg_delta = 0
+
+if stale_recovered:
+    st.error(
+        "⚠️ **检测到历史评分线程被销毁，残留进度已自动清理**\n\n"
+        "Streamlit Runtime 会在长时间无交互/内存压力时销毁旧进程，"
+        "导致内存中的评分结果和后台线程丢失。\n\n"
+        "👉 **请立即点侧边栏 「⚡ 强制重新评分」 按钮，重新启动一轮评分**"
+        "（A 股 2~3 分钟完成，美股/港股受外部限流约需 15~60 分钟补齐）。"
+    )
+elif _dbg_delta > 5:
+    st.warning(
+        f"🔍 状态自检：进度成功数 ({_dbg_prog_ok}) 与表格条数 ({scored_count}) "
+        f"相差 {_dbg_delta} 条，系统正在自动从缓存恢复，请稍等几秒或「📥 读取缓存」。"
+    )
 
 summary = _summary_by_signal(results)
 scores = [float(r.get("total_score") or 0) for r in results if isinstance(r.get("total_score"), (int, float))]

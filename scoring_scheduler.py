@@ -33,7 +33,49 @@ from scoring_engine import score_single
 _BASE_DIR = Path(__file__).resolve().parent
 STOCK_POOL_PATH = _BASE_DIR / "stock_pool.json"
 _SCORE_CACHE_PATH = _BASE_DIR / "data_cache" / "scores_v2.pkl"
-(_BASE_DIR / "data_cache").mkdir(parents=True, exist_ok=True)
+_ALT_CACHE_DIRS: List[Path] = []
+
+def _init_cache_dirs() -> List[Path]:
+    """返回按优先级排序的可写缓存目录列表（多路径兜底，防止 Streamlit 容器 /app 不可写）"""
+    candidates: List[Path] = []
+    candidates.append(_BASE_DIR / "data_cache")
+    _home = Path(os.environ.get("HOME") or os.environ.get("USERPROFILE") or Path.home())
+    candidates.append(_home / ".cache" / "stockfilter")
+    candidates.append(Path(os.environ.get("TMPDIR") or os.environ.get("TEMP") or os.environ.get("TMP") or "/tmp") / "stockfilter_cache")
+    ok_dirs: List[Path] = []
+    for p in candidates:
+        try:
+            p.mkdir(parents=True, exist_ok=True)
+            _probe = p / f".write_probe_{os.getpid()}_{int(time.time()*1000)}.tmp"
+            _probe.write_bytes(b"ok")
+            _probe.unlink(missing_ok=True)
+            ok_dirs.append(p)
+        except Exception:
+            continue
+    if not ok_dirs:
+        try:
+            (_BASE_DIR / "data_cache").mkdir(parents=True, exist_ok=True)
+            ok_dirs.append(_BASE_DIR / "data_cache")
+        except Exception:
+            pass
+    return ok_dirs
+
+_ALT_CACHE_DIRS = _init_cache_dirs()
+def _all_cache_files() -> List[Path]:
+    files: List[Path] = [_SCORE_CACHE_PATH]
+    for d in _ALT_CACHE_DIRS:
+        files.append(d / "scores_v2.pkl")
+    seen = set()
+    uniq: List[Path] = []
+    for f in files:
+        try:
+            k = str(f.resolve())
+        except Exception:
+            k = str(f)
+        if k not in seen:
+            seen.add(k)
+            uniq.append(f)
+    return uniq
 
 _MARKET_LABEL = {
     "US": "🇺🇸 美股",
@@ -132,22 +174,55 @@ def count_pool(pool: Optional[Dict] = None) -> int:
 # ===================== 评分结果读写 =====================
 
 def _read_score_cache() -> Optional[Dict[str, Any]]:
-    if not _SCORE_CACHE_PATH.exists():
-        return None
-    try:
-        with open(_SCORE_CACHE_PATH, "rb") as f:
-            return pickle.load(f)
-    except Exception as e:
-        logger.warning(f"读取评分缓存失败: {e}")
-        return None
+    """多路径 + 多文件兜底读取缓存（任意一个路径读到最新 scored_count 最大的就返回）"""
+    best: Optional[Dict[str, Any]] = None
+    best_n = -1
+    errors: List[str] = []
+    for fp in _all_cache_files():
+        try:
+            if not fp.exists():
+                continue
+            with open(fp, "rb") as f:
+                obj = pickle.load(f)
+            if isinstance(obj, dict):
+                n = int(obj.get("scored_count") or 0)
+                if n > best_n:
+                    best_n = n
+                    best = obj
+        except Exception as e:
+            errors.append(f"{fp.name}:{e}")
+    if errors:
+        logger.warning(f"读取缓存部分失败: {'; '.join(errors[:3])}")
+    return best
 
 
 def _write_score_cache(data: Dict[str, Any]) -> None:
-    try:
-        with open(_SCORE_CACHE_PATH, "wb") as f:
-            pickle.dump(data, f, protocol=pickle.HIGHEST_PROTOCOL)
-    except Exception as e:
-        logger.warning(f"写入评分缓存失败: {e}")
+    """多路径 + 重试 + tmp 原子替换写入缓存（至少 1 个路径写成功才返回，否则报错）"""
+    written = 0
+    last_err: Optional[str] = None
+    payload_bytes = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
+    for fp in _all_cache_files():
+        for attempt in range(3):
+            try:
+                fp.parent.mkdir(parents=True, exist_ok=True)
+                tmp = fp.with_suffix(fp.suffix + f".tmp{os.getpid()}")
+                with open(tmp, "wb") as f:
+                    f.write(payload_bytes)
+                    try:
+                        f.flush()
+                        os.fsync(f.fileno())
+                    except Exception:
+                        pass
+                tmp.replace(fp)
+                written += 1
+                last_err = None
+                break
+            except Exception as e:
+                last_err = f"{fp}:{e}"
+                time.sleep(0.05 * (attempt + 1))
+    if written == 0:
+        logger.error(f"写缓存全部失败: {last_err}")
+        raise IOError(f"Failed to write score cache to ALL paths: {last_err}")
 
 
 # ===================== 核心评分调度 =====================
@@ -313,13 +388,13 @@ def _calc_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def get_current_result() -> Dict[str, Any]:
-    """对外提供：取最新评分结果（带缓存兜底 + 进度-结果一致性修复）
+    """对外提供：取最新评分结果（多路径缓存兜底 + 进度-结果一致性自修复）
 
-    关键修复：如果发现 _last_progress.ok（进度计数）明显 > _last_result.scored_count（结果条数），
-    说明内存里的 _last_result 被某次「读旧磁盘缓存覆盖内存」的操作污染成早期快照了
-    （例如 run_scoring(force_refresh=False) 分支误覆盖）。此时强制丢弃内存结果，
-    重新从磁盘 data_cache/scores_v2.pkl 读取最新内容——因为 _flush_partial() 每完成 1 只
-    股票就会立即写磁盘，所以磁盘缓存一定是增量最新的（最多比实际进度慢 1 只）。
+    自修复逻辑：
+      - 如果 _last_progress.ok >= 2 但内存+磁盘 scored_count 都是 0 → 状态严重异常
+        （典型：旧线程被 Streamlit Runtime 销毁，进度变量残留但结果&缓存全丢了）
+        → 自动把 _last_progress 重置为 0/running=False，并在返回值里标记 stale=True
+        让前端 UI 展示「检测到历史残留进度，已清理，请重新评分」提示
     """
     global _last_result, _last_progress
     with _lock:
@@ -333,23 +408,40 @@ def get_current_result() -> Dict[str, Any]:
         prog_ok > 0 and prog_ok - mem_scored > 1
     )
 
+    stale_recovered = False
     if res and not need_repair:
         return {"status": "ok", "progress": prog, **res}
 
     cached = _read_score_cache()
-    if cached:
-        disk_scored = int(cached.get("scored_count") or 0)
-        if disk_scored >= mem_scored:
-            with _lock:
-                _last_result = cached
-            return {"status": "ok", "from_cache": True, "progress": prog, **cached}
+    disk_scored = int((cached or {}).get("scored_count") or 0)
+
+    if prog_ok >= 2 and mem_scored == 0 and disk_scored == 0:
+        logger.warning(f"检测到脏状态: progress.ok={prog_ok} 但内存/磁盘 scored_count=0，自动清理进度并标记 stale")
+        stale_recovered = True
+        with _lock:
+            _last_progress = {"running": False, "done": 0, "total": 0, "ok": 0, "fail": 0}
+        prog = dict(_last_progress)
+
+    if cached and disk_scored >= max(mem_scored, 0 if stale_recovered else mem_scored):
+        with _lock:
+            _last_result = cached
+        out = {"status": "ok", "from_cache": True, "progress": prog, **cached}
+        if stale_recovered:
+            out["stale_recovered"] = True
+        return out
 
     if res:
-        return {"status": "ok", "progress": prog, **res}
+        out = {"status": "ok", "progress": prog, **res}
+        if stale_recovered:
+            out["stale_recovered"] = True
+        return out
 
-    return {"status": "empty", "progress": prog,
-            "results": [], "stats": _calc_stats([]),
-            "updated_at": "", "pool_size": count_pool(), "scored_count": 0}
+    empty = {"status": "empty", "progress": prog,
+             "results": [], "stats": _calc_stats([]),
+             "updated_at": "", "pool_size": count_pool(), "scored_count": 0}
+    if stale_recovered:
+        empty["stale_recovered"] = True
+    return empty
 
 
 def get_progress() -> Dict[str, Any]:
