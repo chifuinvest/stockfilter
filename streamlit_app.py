@@ -108,30 +108,23 @@ MARKET_LABEL: Dict[str, str] = {
 }
 
 # -----------------------------------------------------------------------------
-# 3. 辅助函数（st.cache_data 缓存评分结果 6 小时，和原来的 data_cache 一致）
-# -----------------------------------------------------------------------------
-@st.cache_data(ttl=21600, show_spinner=False)
-def _cached_scores(force_hash: str) -> Dict[str, Any]:
+def _fetch_scores() -> Dict[str, Any]:
     """
-    缓存评分结果 6 小时；force_hash 作为强制刷新的触发器
-    （每次用户点刷新按钮 force_hash 变，缓存就失效）
+    页面主读路径：直接读 scoring_scheduler 维护的双重缓存（内存 + 磁盘）。
 
-    关键：使用 scoring_scheduler.get_current_result() 而非 run_scoring！
-    - 当后台线程正在评分 (running=True) 时，run_scoring(use_thread=False) 会阻塞等待
-      全部 157 只完成，导致用户看到进度条但表格/KPI迟迟不出现（用户以为是 Bug）。
-    - get_current_result() 只读内存中的 _last_result（_flush_partial 每完成 1 只就更新）
-      + 缓存文件，0.01 秒内返回【增量结果】，出了多少只就立刻显示多少只，
-      完全不阻塞，用户体验丝滑。
+    scoring_scheduler 已经实现了【实时增量更新】：
+      - _flush_partial() 每完成 1 只股票就立即 ① 写磁盘 pickle ② 更新内存 _last_result
+      - get_current_result() 先读内存（毫秒级），再兜底读磁盘缓存（跨进程/跨刷新也能拿到最新）
+    所以这里**绝对不能**再加一层 @st.cache_data！之前套 @st.cache_data(ttl=6h) 是致命重复缓存：
+      ① 「📥 读取缓存」按钮没更新 force_hash → cache_data 一直返回 6h 前的「早期空快照」
+      ② 即使用户后台线程跑到 126/157，页面也读不到新结果，用户误以为「要等全跑完才显示」
     """
     if not _BACKEND_OK:
         return {"results": [], "pool_size": 0, "scored_count": 0, "updated_at": "", "from_cache": False}
-    return sch.get_current_result() or {}
-
-
-def _fetch_scores() -> Dict[str, Any]:
-    """页面主读路径：用 st.cache_data 包装，优先缓存"""
-    force_hash = st.session_state.get("__force_hash__", "v0")
-    return _cached_scores(force_hash)
+    data = sch.get_current_result() or {}
+    # KPI 卡片 delta 需要 from_cache 字段（默认 True，因为读的都是 scoring_scheduler 的缓存）
+    data.setdefault("from_cache", True)
+    return data
 
 
 def _summary_by_signal(results: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -161,11 +154,19 @@ with st.sidebar:
     c1, c2 = st.columns(2, gap="small")
     with c1:
         if st.button("📥 读取缓存", use_container_width=True, type="secondary"):
-            st.success("已从磁盘缓存读取最新评分")
+            # 关键修复：清除所有 st.cache_data 旧快照，避免拿到早期空结果
+            try: st.cache_data.clear()
+            except Exception: pass
+            # 同步更新 force_hash，触发任何残留的缓存 key 失效
+            st.session_state["__force_hash__"] = f"v{int(time.time())}"
+            st.success("✅ 已读取缓存中最新结果（出了多少只就显示多少只）")
             st.rerun()
     with c2:
         if st.button("⚡ 强制重新评分", use_container_width=True, type="primary"):
             if _BACKEND_OK:
+                # 清除历史旧快照缓存，防止显示空结果
+                try: st.cache_data.clear()
+                except Exception: pass
                 # 开启后台线程评分，不阻塞页面
                 resp = sch.run_scoring(force_refresh=True, use_thread=True)
                 st.session_state["__force_hash__"] = f"v{int(time.time())}"
