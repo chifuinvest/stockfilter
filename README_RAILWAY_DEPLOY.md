@@ -1,5 +1,36 @@
 # 🚀 AI 产业链量化监控系统 · Railway 一键部署教程
 
+> **最快上线方案 A（推荐）：** 推代码到 GitHub 后，直接点下面的按钮，5 分钟自动部署完成，不用手动配环境变量
+
+---
+
+## 🌟 方案 A · 一键点按钮上线（90% 用户选这个）
+
+> 前置条件：先把代码 push 到 GitHub（本仓库已完成【步骤 0️⃣】推完后，把下面模板 URL 里的 `<YOUR_GITHUB_USERNAME>` 替换成你自己的 GitHub 用户名，粘贴到浏览器地址栏，回车即可。
+
+```text
+https://railway.app/template/new?template=https%3A%2F%2Fgithub.com%2F<YOUR_GITHUB_USERNAME>%2Fstockfilter%2Ftree%2Fmain&envs=TUSHARE_TOKEN,PYTHONUNBUFFERED,HOME,TZ&envDescription=Tushare%E4%B8%8E%E7%B3%BB%E7%BB%9F%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F%E8%AF%B4%E6%98%8E&envLink=https%3A%2F%2Fgithub.com%2F<YOUR_GITHUB_USERNAME>%2Fstockfilter%2Fblob%2Fmain%2F.env.example&referralCode=
+```
+
+举个例子，假如你的 GitHub 用户名是 `zhangsan`，直接打开下面这个链接：
+
+```
+https://railway.app/template/new?template=https%3A%2F%2Fgithub.com%2Fzhangsan%2Fstockfilter%2Ftree%2Fmain&envs=TUSHARE_TOKEN,PYTHONUNBUFFERED,HOME,TZ&envDescription=Tushare%E4%B8%8E%E7%B3%BB%E7%BB%9F%E7%8E%AF%E5%A2%83%E5%8F%98%E9%87%8F%E8%AF%B4%E6%98%8E&envLink=https%3A%2F%2Fgithub.com%2Fzhangsan%2Fstockfilter%2Fblob%2Fmain%2F.env.example
+```
+
+点进去后：
+1. Railway 会自动识别本仓库的 Procfile/railway.json/nixpacks.toml，并预填 4 个环境变量（TUSHARE_TOKEN、PYTHONUNBUFFERED、HOME、TZ）
+2. 你只需要：
+   - 把 `TUSHARE_TOKEN` 的值填进去（你的 Token：5eeaf804541d13a1530439c7ae33dae5cdf143a1896be28d54884363）
+   - `PYTHONUNBUFFERED` 填 `1`
+   - `HOME` 填 `/app`
+   - `TZ` 填 `Asia/Shanghai`
+3. 点 **"Deploy"** 绿色大按钮，5~10 分钟后自动上线！
+
+---
+
+## 方案 B · 标准手动部署（按钮找不到或想细调配置时用）
+
 > **目标：5 分钟上线，全程网页操作，不用 SSH，不用命令行**
 >
 > 部署前需要准备：
