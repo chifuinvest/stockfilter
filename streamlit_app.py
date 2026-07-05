@@ -279,38 +279,8 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------------------
-# 5.1 进度条 + 运行状态
-# -----------------------------------------------------------------------------
-progress_placeholder = st.empty()
-status_text = st.empty()
-
-if _BACKEND_OK:
-    prog = sch.get_progress() or {}
-    running = prog.get("running", False)
-    total = int(prog.get("total", 0) or 0)
-    done = int(prog.get("done", 0) or 0)
-    ok = int(prog.get("ok", 0) or 0)
-    fail = int(prog.get("fail", 0) or 0)
-
-    if running and total > 0:
-        pct = max(0.0, min(1.0, (done / total) if total else 0.0))
-        progress_placeholder.progress(pct, text=f"评分中：{done}/{total} 只 （成功 {ok} / 失败 {fail}）")
-        wait_msg = str(prog.get("wait_msg") or "").strip()
-        wait_rem = int(prog.get("wait_remaining_seconds") or 0)
-        base_msg = "⏳ 评分任务进行中，稍后页面自动会刷新，也可以手动点侧边栏「📥 读取缓存」看最新结果。"
-        if wait_msg:
-            status_text.caption(
-                f"{base_msg}\n\n"
-                f"⌛ 正在等待：**{wait_msg}**，剩余约 **{wait_rem}** 秒。"
-                f"  *这不是卡死，是接口配额/限流等待，请耐心等待。*"
-            )
-        else:
-            status_text.caption(base_msg)
-    else:
-        progress_placeholder.progress(1.0, text="✅ 评分任务已就绪（读缓存）")
-
-# -----------------------------------------------------------------------------
-# 5.2 读取评分结果 + KPI 卡片
+# 5.1 先读一次评分结果（用于：进度块合并 progress、后面 KPI 和表格共享）
+#     必须放在进度条渲染之前，保证进度块里能拿到 scored_count / pool_size / data.progress
 # -----------------------------------------------------------------------------
 data = _fetch_scores() or {}
 results: List[Dict[str, Any]] = data.get("results") or []
@@ -319,6 +289,95 @@ scored_count = int(data.get("scored_count", 0) or 0)
 updated_at = str(data.get("updated_at") or "")
 from_cache = bool(data.get("from_cache", False))
 stale_recovered = bool(data.get("stale_recovered", False))
+
+# -----------------------------------------------------------------------------
+# 5.2 进度条 + 运行状态
+# -----------------------------------------------------------------------------
+progress_placeholder = st.empty()
+status_text = st.empty()
+
+try:
+    if _BACKEND_OK:
+        # 合并两处进度源：直接 get_progress() + 评分结果里带的 progress；取信息更丰富的那份
+        prog_direct = sch.get_progress() if sch else {}
+        prog_from_data = data.get("progress", {}) if isinstance(data, dict) else {}
+
+        def _merge_p(a, b):
+            """取 total/ok/done 值更大、running 更真、有 wait_msg 的那份"""
+            m = dict(a) if isinstance(a, dict) else {}
+            b = dict(b) if isinstance(b, dict) else {}
+            if int(b.get("total") or 0) > int(m.get("total") or 0) or \
+               int(b.get("ok") or 0) > int(m.get("ok") or 0) or \
+               int(b.get("done") or 0) > int(m.get("done") or 0):
+                for _kk, _vv in b.items():
+                    m.setdefault(_kk, _vv)
+            if bool(b.get("running")) and not bool(m.get("running")):
+                m["running"] = True
+            if b.get("wait_msg") and not m.get("wait_msg"):
+                m["wait_msg"] = b["wait_msg"]
+                m["wait_remaining_seconds"] = b.get("wait_remaining_seconds", 0)
+            return m
+
+        prog = _merge_p(prog_direct, prog_from_data)
+        running = bool(prog.get("running", False))
+        total = int(prog.get("total", 0) or 0)
+        done = int(prog.get("done", 0) or 0)
+        ok = int(prog.get("ok", 0) or 0)
+        fail = int(prog.get("fail", 0) or 0)
+        wait_msg = str(prog.get("wait_msg") or "").strip()
+        wait_rem = int(prog.get("wait_remaining_seconds") or 0)
+
+        # --- 显示条件放宽：评分中(running) 或 有缓存结果(scored_count) 都显示进度数字 ---
+        show_numbers = False
+        pct = 0.0
+        progress_text = ""
+
+        if running and total > 0:
+            # Case A：评分线程正在跑 → 进度百分比 + 数字实时显示
+            show_numbers = True
+            pct = max(0.0, min(1.0, (done / total) if total else 0.0))
+            progress_text = f"评分中：{done}/{total} 只 （成功 {ok} / 失败 {fail}）"
+        elif scored_count > 0 and pool_size > 0:
+            # Case B：评分未在跑，但已有缓存结果（可能刚结束、或在其他 worker 上跑）→ 显示已评分进度
+            show_numbers = True
+            pct = max(0.0, min(1.0, scored_count / pool_size))
+            progress_text = f"已评分：{scored_count}/{pool_size} 只 （成功 {max(ok, scored_count)} / 失败 {fail}）"
+        elif done > 0 and total > 0:
+            # Case C：线程未标记 running 但磁盘里存了部分 done（典型：worker 被杀后残留进度）→ 也显示出来避免"数字完全不出现"
+            show_numbers = True
+            pct = max(0.0, min(1.0, done / total))
+            progress_text = f"进度残留：{done}/{total} 只（可点「强制重新评分」重启）"
+
+        if show_numbers:
+            progress_placeholder.progress(pct, text=progress_text)
+            base_msg = "⏳ 页面每 15 秒自动刷新，也可以随时手动点侧边栏「📥 读取缓存」看最新结果。"
+            if running and wait_msg:
+                status_text.caption(
+                    f"{base_msg}\n\n"
+                    f"⌛ 正在等待：**{wait_msg}**，剩余约 **{wait_rem}** 秒。"
+                    f"  这不是卡死，是数据源接口配额/限流等待，请耐心等待。"
+                )
+            elif running:
+                status_text.caption(base_msg)
+            elif scored_count >= pool_size and pool_size > 0:
+                status_text.caption("✅ 全部评分完成，数据已缓存。点击「⚡ 强制重新评分」可重新拉取。")
+            else:
+                status_text.caption(
+                    "ℹ️ 读取到部分缓存结果。若需要最新数据，点击侧边栏「⚡ 强制重新评分」。"
+                )
+        else:
+            progress_placeholder.progress(1.0, text="✅ 评分任务已就绪，点击侧边栏「⚡ 强制重新评分」开始")
+except Exception as _pe:
+    # 进度条渲染绝不阻塞主页面：出错时只显示一个安全的兜底占位
+    try:
+        progress_placeholder.progress(1.0, text="ℹ️ 进度模块异常，评分结果仍可在下方表格中查看")
+        status_text.caption(f"进度读取/渲染异常：{str(_pe)[:100]}")
+    except Exception:
+        pass
+
+# -----------------------------------------------------------------------------
+# 5.3 诊断告警：stale_recovered / 进度-结果差异过大
+# -----------------------------------------------------------------------------
 
 # ---- 诊断：进度 vs 结果不一致时，给用户明确提示 ----
 if _BACKEND_OK:

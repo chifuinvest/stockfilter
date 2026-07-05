@@ -488,26 +488,73 @@ def _calc_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def get_progress() -> Dict[str, Any]:
-    """取进度：内存 vs 磁盘，取 done 值最大的那份返回（跨 Streamlit worker 共享）"""
-    global _last_progress
-    with _lock:
-        mem = dict(_last_progress)
-    mem_done = int(mem.get("done") or 0)
-    disk = _read_progress_cache() or {}
-    disk_done = int(disk.get("done") or 0)
-    if disk_done > mem_done or (not mem and disk_done > 0):
-        merged = dict(disk)
-    else:
-        merged = mem
-    running_disk = bool((disk or {}).get("running", False))
-    if running_disk and not merged.get("running"):
-        merged["running"] = True
-    merged.setdefault("running", False)
-    merged.setdefault("done", 0)
-    merged.setdefault("total", 0)
-    merged.setdefault("ok", 0)
-    merged.setdefault("fail", 0)
-    return merged
+    """取进度：内存 vs 磁盘，取 done 值最大的那份返回（跨 Streamlit worker 共享）
+
+    对外契约：永不抛异常；返回的 dict 一定含有 running/done/total/ok/fail 5 个默认字段，
+    且类型都是 (bool, int, int, int, int)，调用方可以直接下标不做 None 检查。
+    """
+    EMPTY = {"running": False, "done": 0, "total": 0, "ok": 0, "fail": 0}
+    try:
+        global _last_progress
+        with _lock:
+            mem_val = _last_progress
+        mem = dict(mem_val) if isinstance(mem_val, dict) else dict(EMPTY)
+        # 给 mem 补齐字段，防止老的内存对象缺字段
+        for _k, _v in EMPTY.items():
+            mem.setdefault(_k, _v)
+        try:
+            mem_done = int(mem.get("done") or 0)
+        except Exception:
+            mem_done = 0
+        # ---------- 读磁盘：单独 try，失败就当空 ----------
+        disk = {}
+        try:
+            disk_raw = _read_progress_cache()
+            if isinstance(disk_raw, dict):
+                disk = disk_raw
+                for _k, _v in EMPTY.items():
+                    disk.setdefault(_k, _v)
+        except Exception as de:
+            logger.warning(f"get_progress 读磁盘progress失败: {de}")
+            disk = {}
+        try:
+            disk_done = int((disk or {}).get("done") or 0)
+        except Exception:
+            disk_done = 0
+        # ---------- 选 done 大的 ----------
+        try:
+            if (disk or {}).get("done") is not None and (disk_done > mem_done or (not mem and disk_done > 0)):
+                merged_raw = disk
+            else:
+                merged_raw = mem
+            merged = dict(merged_raw) if isinstance(merged_raw, dict) else dict(EMPTY)
+        except Exception:
+            merged = dict(mem)
+        # 运行状态：磁盘 running=True 时合并到结果（防止其他 worker 跑的线程 mem 里 running=False）
+        try:
+            running_disk = bool((disk or {}).get("running", False))
+            if running_disk and not merged.get("running"):
+                merged["running"] = True
+        except Exception:
+            pass
+        # wait_msg / wait_remaining_seconds 也透传（保持之前的等待提示）
+        if isinstance(disk, dict):
+            for extra in ("wait_msg", "wait_remaining_seconds"):
+                if extra in disk and extra not in merged and disk.get(extra):
+                    merged[extra] = disk[extra]
+        # 最终兜底：确保 5 个主字段存在且类型正确
+        for _k, _v in EMPTY.items():
+            merged.setdefault(_k, _v)
+        try:
+            merged["running"] = bool(merged.get("running", False))
+            for _ik in ("done", "total", "ok", "fail"):
+                merged[_ik] = int(merged.get(_ik) or 0)
+        except Exception:
+            pass
+        return merged
+    except Exception as e:
+        logger.exception(f"get_progress 顶层异常: {e}")
+        return dict(EMPTY)
 
 
 def get_current_result() -> Dict[str, Any]:
