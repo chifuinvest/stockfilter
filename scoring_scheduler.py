@@ -33,6 +33,7 @@ from scoring_engine import score_single
 _BASE_DIR = Path(__file__).resolve().parent
 STOCK_POOL_PATH = _BASE_DIR / "stock_pool.json"
 _SCORE_CACHE_PATH = _BASE_DIR / "data_cache" / "scores_v2.pkl"
+_PROGRESS_CACHE_PATH = _BASE_DIR / "data_cache" / "progress_v2.pkl"
 _ALT_CACHE_DIRS: List[Path] = []
 
 def _init_cache_dirs() -> List[Path]:
@@ -61,10 +62,12 @@ def _init_cache_dirs() -> List[Path]:
     return ok_dirs
 
 _ALT_CACHE_DIRS = _init_cache_dirs()
-def _all_cache_files() -> List[Path]:
-    files: List[Path] = [_SCORE_CACHE_PATH]
+
+def _all_cache_files_for(basename: str) -> List[Path]:
+    default = _BASE_DIR / "data_cache" / basename
+    files: List[Path] = [default]
     for d in _ALT_CACHE_DIRS:
-        files.append(d / "scores_v2.pkl")
+        files.append(d / basename)
     seen = set()
     uniq: List[Path] = []
     for f in files:
@@ -76,6 +79,49 @@ def _all_cache_files() -> List[Path]:
             seen.add(k)
             uniq.append(f)
     return uniq
+
+def _all_score_files() -> List[Path]:
+    return _all_cache_files_for("scores_v2.pkl")
+
+def _all_progress_files() -> List[Path]:
+    return _all_cache_files_for("progress_v2.pkl")
+
+def _all_cache_files() -> List[Path]:
+    return _all_score_files()
+
+def _inspect_caches() -> List[Dict[str, Any]]:
+    """调试接口：返回所有缓存路径的元信息，便于前端展示诊断面板"""
+    rows: List[Dict[str, Any]] = []
+    for kind, files in (("scores", _all_score_files()), ("progress", _all_progress_files())):
+        for fp in files:
+            row: Dict[str, Any] = {"kind": kind, "path": str(fp)}
+            try:
+                if fp.exists():
+                    st = fp.stat()
+                    row["exists"] = True
+                    row["size_bytes"] = int(st.st_size)
+                    row["mtime"] = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+                    try:
+                        with open(fp, "rb") as f:
+                            obj = pickle.load(f)
+                        if isinstance(obj, dict):
+                            if kind == "scores":
+                                row["scored_count"] = int(obj.get("scored_count") or 0)
+                                row["pool_size"] = int(obj.get("pool_size") or 0)
+                                row["partial"] = bool(obj.get("partial", False))
+                            else:
+                                row["progress_done"] = int(obj.get("done") or 0)
+                                row["progress_total"] = int(obj.get("total") or 0)
+                                row["progress_ok"] = int(obj.get("ok") or 0)
+                                row["progress_running"] = bool(obj.get("running", False))
+                    except Exception as pe:
+                        row["parse_error"] = str(pe)[:80]
+                else:
+                    row["exists"] = False
+            except Exception as e:
+                row["stat_error"] = str(e)[:80]
+            rows.append(row)
+    return rows
 
 _MARKET_LABEL = {
     "US": "🇺🇸 美股",
@@ -173,35 +219,46 @@ def count_pool(pool: Optional[Dict] = None) -> int:
 
 # ===================== 评分结果读写 =====================
 
-def _read_score_cache() -> Optional[Dict[str, Any]]:
-    """多路径 + 多文件兜底读取缓存（任意一个路径读到最新 scored_count 最大的就返回）"""
+def _read_any_cache(basename: str, compare_key: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """读取某类缓存（scores/progress），从所有路径中挑 compare_key 值最大的那份返回（compare_key=None 则取最新 mtime）"""
     best: Optional[Dict[str, Any]] = None
-    best_n = -1
+    best_key_val = -1 if compare_key else 0.0
+    best_mtime = -1.0
     errors: List[str] = []
-    for fp in _all_cache_files():
+    for fp in _all_cache_files_for(basename):
         try:
             if not fp.exists():
                 continue
+            st_info = fp.stat()
+            mtime = float(st_info.st_mtime)
             with open(fp, "rb") as f:
                 obj = pickle.load(f)
-            if isinstance(obj, dict):
-                n = int(obj.get("scored_count") or 0)
-                if n > best_n:
-                    best_n = n
+            if not isinstance(obj, dict):
+                continue
+            if compare_key:
+                val = int(obj.get(compare_key) or 0)
+                better = val > best_key_val or (val == best_key_val and mtime > best_mtime)
+                if better:
+                    best_key_val = val
+                    best_mtime = mtime
+                    best = obj
+            else:
+                if mtime > best_mtime:
+                    best_mtime = mtime
                     best = obj
         except Exception as e:
             errors.append(f"{fp.name}:{e}")
     if errors:
-        logger.warning(f"读取缓存部分失败: {'; '.join(errors[:3])}")
+        logger.warning(f"读缓存[{basename}]部分失败: {'; '.join(errors[:3])}")
     return best
 
 
-def _write_score_cache(data: Dict[str, Any]) -> None:
-    """多路径 + 重试 + tmp 原子替换写入缓存（至少 1 个路径写成功才返回，否则报错）"""
+def _write_any_cache(basename: str, data: Dict[str, Any]) -> None:
+    """多路径+重试+原子+fsync写某类缓存。至少 1 路径成功返回；全失败抛 IOError。"""
     written = 0
     last_err: Optional[str] = None
     payload_bytes = pickle.dumps(data, protocol=pickle.HIGHEST_PROTOCOL)
-    for fp in _all_cache_files():
+    for fp in _all_cache_files_for(basename):
         for attempt in range(3):
             try:
                 fp.parent.mkdir(parents=True, exist_ok=True)
@@ -221,21 +278,43 @@ def _write_score_cache(data: Dict[str, Any]) -> None:
                 last_err = f"{fp}:{e}"
                 time.sleep(0.05 * (attempt + 1))
     if written == 0:
-        logger.error(f"写缓存全部失败: {last_err}")
-        raise IOError(f"Failed to write score cache to ALL paths: {last_err}")
+        msg = f"写缓存[{basename}]全部路径失败: {last_err}"
+        logger.error(msg)
+        raise IOError(msg)
+
+
+def _read_score_cache() -> Optional[Dict[str, Any]]:
+    return _read_any_cache("scores_v2.pkl", compare_key="scored_count")
+
+
+def _write_score_cache(data: Dict[str, Any]) -> None:
+    _write_any_cache("scores_v2.pkl", data)
+
+
+def _read_progress_cache() -> Optional[Dict[str, Any]]:
+    return _read_any_cache("progress_v2.pkl", compare_key="done")
+
+
+def _write_progress_cache(data: Dict[str, Any]) -> None:
+    _write_any_cache("progress_v2.pkl", data)
 
 
 # ===================== 核心评分调度 =====================
 
 def _progress_cb(done, total, ok, fail, wait_msg: Optional[str] = None, wait_remaining_seconds: int = 0):
-    """更新进度状态；可选 wait_msg 用于长等待时的提示（如港股配额/Yahoo 退避），让用户知道没卡死"""
+    """更新进度状态（内存 + 磁盘双写，彻底支持 Streamlit Cloud 多 worker 跨进程共享）"""
     global _last_progress
+    payload: Dict[str, Any] = {"running": True, "done": int(done), "total": int(total), "ok": int(ok), "fail": int(fail)}
+    if wait_msg:
+        payload["wait_msg"] = wait_msg
+        payload["wait_remaining_seconds"] = int(max(0, wait_remaining_seconds))
     with _lock:
-        payload = {"running": True, "done": done, "total": total, "ok": ok, "fail": fail}
-        if wait_msg:
-            payload["wait_msg"] = wait_msg
-            payload["wait_remaining_seconds"] = int(max(0, wait_remaining_seconds))
-        _last_progress = payload
+        _last_progress = dict(payload)
+    # 立刻写磁盘——任何 worker 下次调用 get_progress/get_current_result 都能立刻读到最新进度
+    try:
+        _write_progress_cache(payload)
+    except Exception as e:
+        logger.warning(f"进度落盘失败: {e}")
 
 
 def run_scoring(force_refresh: bool = False, use_thread: bool = True) -> Dict[str, Any]:
@@ -254,7 +333,13 @@ def run_scoring(force_refresh: bool = False, use_thread: bool = True) -> Dict[st
                 _last_result = cached
                 return {"status": "ok", "from_cache": True, **cached}
 
-        _last_progress = {"running": True, "done": 0, "total": 0, "ok": 0, "fail": 0}
+        _reset_prog = {"running": True, "done": 0, "total": 0, "ok": 0, "fail": 0}
+        with _lock:
+            _last_progress = dict(_reset_prog)
+        try:
+            _write_progress_cache(_reset_prog)
+        except Exception:
+            pass
 
     if use_thread:
         t = threading.Thread(target=_do_run_scoring, args=(force_refresh,), daemon=True)
@@ -270,8 +355,13 @@ def _do_run_scoring(force_refresh: bool) -> Dict[str, Any]:
     pool = load_stock_pool()
     flat = flatten_pool(pool)
     N = len(flat)
+    _init_prog = {"running": True, "done": 0, "total": N, "ok": 0, "fail": 0}
     with _lock:
-        _last_progress = {"running": True, "done": 0, "total": N, "ok": 0, "fail": 0}
+        _last_progress = dict(_init_prog)
+    try:
+        _write_progress_cache(_init_prog)
+    except Exception:
+        pass
 
     logger.info(f"开始增量评分: {N} 只股票（强制刷新={force_refresh}）")
 
@@ -341,8 +431,13 @@ def _do_run_scoring(force_refresh: bool) -> Dict[str, Any]:
                 fail += 1
             finally:
                 try:
+                    _cur_prog = {"running": True, "done": idx, "total": N, "ok": ok, "fail": fail}
                     with _lock:
-                        _last_progress = {"running": True, "done": idx, "total": N, "ok": ok, "fail": fail}
+                        _last_progress = dict(_cur_prog)
+                    try:
+                        _write_progress_cache(_cur_prog)
+                    except Exception:
+                        pass
                     _flush_partial()
                 except Exception as fe:
                     logger.warning(f"进度/缓存写入异常({code}): {fe}")
@@ -358,9 +453,14 @@ def _do_run_scoring(force_refresh: bool) -> Dict[str, Any]:
         "scored_count": len(sorted_results),
     }
     _write_score_cache(payload)
+    _final_prog = {"running": False, "done": N, "total": N, "ok": ok, "fail": fail}
     with _lock:
         _last_result = payload
-        _last_progress = {"running": False, "done": N, "total": N, "ok": ok, "fail": fail}
+        _last_progress = dict(_final_prog)
+    try:
+        _write_progress_cache(_final_prog)
+    except Exception:
+        pass
     logger.info(f"评分完成: {ok}/{N} 成功, {fail} 失败, 更新时间 {updated_at}")
     return {"status": "ok", "from_cache": False, **payload}
 
@@ -387,63 +487,110 @@ def _calc_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def get_current_result() -> Dict[str, Any]:
-    """对外提供：取最新评分结果（多路径缓存兜底 + 进度-结果一致性自修复）
+def get_progress() -> Dict[str, Any]:
+    """取进度：内存 vs 磁盘，取 done 值最大的那份返回（跨 Streamlit worker 共享）"""
+    global _last_progress
+    with _lock:
+        mem = dict(_last_progress)
+    mem_done = int(mem.get("done") or 0)
+    disk = _read_progress_cache() or {}
+    disk_done = int(disk.get("done") or 0)
+    if disk_done > mem_done or (not mem and disk_done > 0):
+        merged = dict(disk)
+    else:
+        merged = mem
+    running_disk = bool((disk or {}).get("running", False))
+    if running_disk and not merged.get("running"):
+        merged["running"] = True
+    merged.setdefault("running", False)
+    merged.setdefault("done", 0)
+    merged.setdefault("total", 0)
+    merged.setdefault("ok", 0)
+    merged.setdefault("fail", 0)
+    return merged
 
-    自修复逻辑：
-      - 如果 _last_progress.ok >= 2 但内存+磁盘 scored_count 都是 0 → 状态严重异常
-        （典型：旧线程被 Streamlit Runtime 销毁，进度变量残留但结果&缓存全丢了）
-        → 自动把 _last_progress 重置为 0/running=False，并在返回值里标记 stale=True
-        让前端 UI 展示「检测到历史残留进度，已清理，请重新评分」提示
+
+def get_current_result() -> Dict[str, Any]:
+    """对外提供：取最新评分结果（磁盘优先 + 内存兜底 = Single Source of Truth 跨 worker 共享）
+
+    架构核心变更：
+      Streamlit Cloud 采用多 worker / fork-on-rerun 模型，评分线程写的内存变量只对写的那个进程可见。
+      所以这里**无条件先读磁盘**（scored_count 最大的那份），再和内存合并取最优值。
+      这样只要 `_flush_partial()` 每只写一次磁盘成功，所有 worker 都能读到最新结果。
     """
     global _last_result, _last_progress
+
+    disk_scores = _read_score_cache()
+    disk_prog = _read_progress_cache()
+
     with _lock:
-        prog = dict(_last_progress)
-        res = dict(_last_result) if _last_result else {}
+        mem_prog = dict(_last_progress)
+        mem_res = dict(_last_result) if _last_result else {}
+
+    # -------- 合并进度：磁盘 vs 内存，取 done 更大的 --------
+    mem_done = int(mem_prog.get("done") or 0)
+    disk_done = int((disk_prog or {}).get("done") or 0)
+    if disk_done > mem_done or (not mem_prog and disk_done > 0):
+        prog = dict(disk_prog or {})
+    else:
+        prog = dict(mem_prog)
+    running_disk = bool((disk_prog or {}).get("running", False))
+    if running_disk and not prog.get("running"):
+        prog["running"] = True
+    prog.setdefault("running", False)
+    prog.setdefault("done", 0)
+    prog.setdefault("total", 0)
+    prog.setdefault("ok", 0)
+    prog.setdefault("fail", 0)
 
     prog_ok = int(prog.get("ok") or 0)
-    mem_scored = int(res.get("scored_count") or 0) if res else 0
 
-    need_repair = (
-        prog_ok > 0 and prog_ok - mem_scored > 1
-    )
+    # -------- 合并结果：磁盘 vs 内存，取 scored_count 更大的 --------
+    disk_scored = int((disk_scores or {}).get("scored_count") or 0)
+    mem_scored = int(mem_res.get("scored_count") or 0) if mem_res else 0
 
     stale_recovered = False
-    if res and not need_repair:
-        return {"status": "ok", "progress": prog, **res}
+    if (disk_scores or {}).get("scored_count", 0) is not None:
+        if disk_scored >= mem_scored and disk_scores is not None:
+            final_res = dict(disk_scores)
+            final_src = "disk"
+            with _lock:
+                if disk_scored > mem_scored:
+                    _last_result = disk_scores
+        elif mem_res:
+            final_res = mem_res
+            final_src = "mem"
+        else:
+            final_res = {}
+            final_src = "empty"
+    else:
+        final_res = mem_res if mem_res else {}
+        final_src = "mem" if mem_res else "empty"
 
-    cached = _read_score_cache()
-    disk_scored = int((cached or {}).get("scored_count") or 0)
+    final_scored = int(final_res.get("scored_count") or 0) if final_res else 0
 
-    if prog_ok >= 2 and mem_scored == 0 and disk_scored == 0:
-        logger.warning(f"检测到脏状态: progress.ok={prog_ok} 但内存/磁盘 scored_count=0，自动清理进度并标记 stale")
+    # -------- stale 自修复：progress.ok >=2 但 final_scored=0（典型：旧线程销毁但缓存全丢）--------
+    if prog_ok >= 2 and final_scored == 0:
+        logger.warning(f"[stale修复] progress.ok={prog_ok} 但结果=0, 清理进度并标记")
         stale_recovered = True
+        reset = {"running": False, "done": 0, "total": 0, "ok": 0, "fail": 0}
         with _lock:
-            _last_progress = {"running": False, "done": 0, "total": 0, "ok": 0, "fail": 0}
-        prog = dict(_last_progress)
+            _last_progress = dict(reset)
+        try:
+            _write_progress_cache(reset)
+        except Exception:
+            pass
+        prog = reset
 
-    if cached and disk_scored >= max(mem_scored, 0 if stale_recovered else mem_scored):
-        with _lock:
-            _last_result = cached
-        out = {"status": "ok", "from_cache": True, "progress": prog, **cached}
+    if final_res:
+        out = {"status": "ok", "progress": prog, "debug_src": final_src, **final_res}
         if stale_recovered:
             out["stale_recovered"] = True
         return out
 
-    if res:
-        out = {"status": "ok", "progress": prog, **res}
-        if stale_recovered:
-            out["stale_recovered"] = True
-        return out
-
-    empty = {"status": "empty", "progress": prog,
+    empty = {"status": "empty", "progress": prog, "debug_src": final_src,
              "results": [], "stats": _calc_stats([]),
              "updated_at": "", "pool_size": count_pool(), "scored_count": 0}
     if stale_recovered:
         empty["stale_recovered"] = True
     return empty
-
-
-def get_progress() -> Dict[str, Any]:
-    with _lock:
-        return dict(_last_progress)

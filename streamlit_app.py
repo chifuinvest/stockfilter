@@ -369,6 +369,59 @@ if scored_count > 0 or pool_size > 0 or bool(results):
         st.caption(f"🕒 最近一次完整评分时间：{updated_at}")
     st.divider()
 
+# ===== 诊断面板（默认折叠）：展示所有缓存路径的真实状态，快速定位写入/读取问题 =====
+if _BACKEND_OK:
+    with st.expander("🔧 系统诊断（排查「不显示表格 / 进度不更新」）", expanded=False):
+        debug_src = str(data.get("debug_src") or "n/a")
+        st.markdown(f"**当前结果来源**：`{debug_src}`  （disk=从磁盘缓存读到最新；mem=只读到内存；empty=两者都空）")
+        import pandas as pd
+        try:
+            _raw = sch._inspect_caches()
+        except Exception as _de:
+            _raw = []
+            st.warning(f"调用 _inspect_caches 失败：{str(_de)[:100]}")
+        if _raw:
+            _rows = []
+            for _r in _raw:
+                _p = str(_r.get("path", ""))
+                # 缩短路径展示
+                for _short in (str(_BASE_DIR), os.environ.get("HOME") or "/home"):
+                    if _short and _p.startswith(_short):
+                        _p = "..." + _p[len(_short):]
+                        break
+                _row = {
+                    "类型": _r.get("kind", ""),
+                    "路径": _p,
+                    "存在": "✅" if _r.get("exists") else "❌",
+                }
+                if _r.get("exists"):
+                    _row["大小(KB)"] = round(int(_r.get("size_bytes") or 0) / 1024, 1)
+                    _row["修改时间"] = _r.get("mtime", "")
+                    if _r.get("kind") == "scores":
+                        _row["scored_count"] = _r.get("scored_count", 0)
+                        _row["pool_size"] = _r.get("pool_size", 0)
+                        _row["partial?"] = "是" if _r.get("partial") else "否"
+                    else:
+                        _row["进度 done/total"] = f"{_r.get('progress_done', 0)}/{_r.get('progress_total', 0)}"
+                        _row["ok/fail"] = f"{_r.get('progress_ok', 0)}/{_r.get('fail', 0)}"
+                        _row["running?"] = "是" if _r.get("progress_running") else "否"
+                if _r.get("parse_error"):
+                    _row["解析错误"] = _r["parse_error"]
+                if _r.get("stat_error"):
+                    _row["stat错误"] = _r["stat_error"]
+                _rows.append(_row)
+            _df = pd.DataFrame(_rows)
+            st.dataframe(_df, use_container_width=True, hide_index=True,
+                         column_config={"路径": st.column_config.Column("路径", width="large")})
+            st.caption(
+                "💡 **看这里快速判断根因**：\n"
+                "- 所有 scores 行 scored_count=0 → 写缓存全部失败（容器文件系统权限）\n"
+                "- progress.done>0 但 scores.scored_count=0 → 线程在跑但写结果失败\n"
+                "- 多路径之间 scored_count 不一致 → 某条路径写入/读取失败，已自动取最大值\n"
+                "- 所有路径 ❌ 不存在 → 还没触发过任何评分，请点「⚡ 强制重新评分」"
+            )
+        st.button("🔄 立即刷新诊断（重新扫所有缓存路径）", use_container_width=False)
+
 # -----------------------------------------------------------------------------
 # 5.3 信号筛选 + 表格展示
 # -----------------------------------------------------------------------------
