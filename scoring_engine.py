@@ -4,6 +4,10 @@
 - 6 个技术指标：MA / MACD / RSI / 布林带 / 成交量 / KDJ
 - 加权总分 0~100
 - 信号判定 + 多周期涨跌幅
+
+免责声明：本系统输出仅供研究和学习使用，不构成任何投资建议。
+          市场有风险，投资需谨慎，实盘盈亏自负，版权方不承担法律责任。
+版权所有 (c) 2025 Yan Ying · 联系方式：yanying76@gmail.com
 """
 import numpy as np
 import pandas as pd

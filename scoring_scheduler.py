@@ -5,6 +5,10 @@
 - 遍历股票池执行拉取 + 评分
 - 评分结果缓存到 data_cache/scores_v2.pkl
 - 统计汇总（信号分布等）
+
+免责声明：本系统输出仅供研究和学习使用，不构成任何投资建议。
+          市场有风险，投资需谨慎，实盘盈亏自负，版权方不承担法律责任。
+版权所有 (c) 2025 Yan Ying · 联系方式：yanying76@gmail.com
 """
 import os
 import json

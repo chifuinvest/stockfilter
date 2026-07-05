@@ -3,6 +3,14 @@
 # 部署：Streamlit Community Cloud（完全免费，只要 GitHub 公开仓库）
 # 启动：streamlit run streamlit_app.py
 # =============================================================================
+# 免责声明：
+#     本系统及其输出的评分、信号、涨跌幅、技术指标等数据仅供研究与学习使用，
+#     **不构成任何投资建议或承诺**。市场有风险，投资需谨慎，任何基于
+#     本系统进行的实盘交易行为盈亏自负，作者及版权方不承担任何法律责任。
+#
+# 版权所有 (c) 2025 Yan Ying
+# 联系方式：yanying76@gmail.com
+# =============================================================================
 import os
 import sys
 import time
@@ -414,3 +422,39 @@ else:
         )
     else:
         st.info(f"🔍 当前筛选下没有匹配的股票（信号：{SIGNAL_LABEL.get(_filter_signal, _filter_signal)}），尝试切到其他信号或全部。")
+
+# =============================================================================
+# 页脚：免责声明 + 版权 + 联系方式（固定在页面最底部，每次 rerun 都会渲染）
+# =============================================================================
+st.divider()
+c_left, c_right = st.columns([2, 1], gap="large")
+with c_left:
+    st.markdown(
+        """
+        <div style="color:#6c757d;font-size:14px;line-height:1.6;">
+          <p style="font-weight:600;margin-bottom:8px;color:#212529;">📜 免责声明</p>
+          <p style="margin:0 0 6px 0;">
+            本系统及其输出内容（包括但不限于评分、信号、涨跌幅、技术指标、股票池等）
+            <b>仅供研究和学习使用，不构成任何投资建议或承诺</b>。
+          </p>
+          <p style="margin:0;">
+            市场有风险，投资需谨慎。任何基于本系统进行的实盘交易行为，盈亏自负，
+            作者及版权方不承担任何法律责任。
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with c_right:
+    st.markdown(
+        """
+        <div style="color:#6c757d;font-size:14px;line-height:1.6;text-align:right;">
+          <p style="font-weight:600;margin-bottom:8px;color:#212529;">© 版权信息</p>
+          <p style="margin:0 0 6px 0;">&copy; 2025 <b>Yan Ying</b><br>All rights reserved.</p>
+          <p style="margin:0;">
+            📧 联系方式：<a href="mailto:yanying76@gmail.com">yanying76@gmail.com</a>
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )

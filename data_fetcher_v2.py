@@ -5,6 +5,10 @@
 - 3次网络重试，间隔 2/4/8 秒
 - 缓存到 ./data_cache/ 目录，优先读缓存
 - Tushare token 读取顺序: 环境变量 TUSHARE_TOKEN > ~/.tushare/token.txt
+
+免责声明：本系统输出仅供研究和学习使用，不构成任何投资建议。
+          市场有风险，投资需谨慎，实盘盈亏自负，版权方不承担法律责任。
+版权所有 (c) 2025 Yan Ying · 联系方式：yanying76@gmail.com
 """
 import os
 import sys
