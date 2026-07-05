@@ -313,18 +313,40 @@ def _calc_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def get_current_result() -> Dict[str, Any]:
-    """对外提供：取最新评分结果（带缓存兜底）"""
+    """对外提供：取最新评分结果（带缓存兜底 + 进度-结果一致性修复）
+
+    关键修复：如果发现 _last_progress.ok（进度计数）明显 > _last_result.scored_count（结果条数），
+    说明内存里的 _last_result 被某次「读旧磁盘缓存覆盖内存」的操作污染成早期快照了
+    （例如 run_scoring(force_refresh=False) 分支误覆盖）。此时强制丢弃内存结果，
+    重新从磁盘 data_cache/scores_v2.pkl 读取最新内容——因为 _flush_partial() 每完成 1 只
+    股票就会立即写磁盘，所以磁盘缓存一定是增量最新的（最多比实际进度慢 1 只）。
+    """
     global _last_result, _last_progress
     with _lock:
         prog = dict(_last_progress)
         res = dict(_last_result) if _last_result else {}
-    if res:
+
+    prog_ok = int(prog.get("ok") or 0)
+    mem_scored = int(res.get("scored_count") or 0) if res else 0
+
+    need_repair = (
+        prog_ok > 0 and prog_ok - mem_scored > 1
+    )
+
+    if res and not need_repair:
         return {"status": "ok", "progress": prog, **res}
+
     cached = _read_score_cache()
     if cached:
-        with _lock:
-            _last_result = cached
-        return {"status": "ok", "from_cache": True, "progress": prog, **cached}
+        disk_scored = int(cached.get("scored_count") or 0)
+        if disk_scored >= mem_scored:
+            with _lock:
+                _last_result = cached
+            return {"status": "ok", "from_cache": True, "progress": prog, **cached}
+
+    if res:
+        return {"status": "ok", "progress": prog, **res}
+
     return {"status": "empty", "progress": prog,
             "results": [], "stats": _calc_stats([]),
             "updated_at": "", "pool_size": count_pool(), "scored_count": 0}

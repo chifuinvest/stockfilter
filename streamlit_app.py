@@ -401,31 +401,44 @@ else:
         df.sort_values(by=["总分"], ascending=False, inplace=True)
         df.reset_index(drop=True, inplace=True)
 
-        # DataFrame style：按 signal_key 给整行染色（Streamlit 1.30+ 支持 Styler）
+        # DataFrame style：按 signal_key 给整行染色 + 涨跌幅红涨绿跌
         def _row_color(row):
             css = SIGNAL_COLOR_CSS.get(str(row.get("signal_key", "")), "")
             return [css] * len(row)
 
-        styled = df.drop(columns=["signal_key"]).style.apply(_row_color, axis=1)
+        def _pct_color(val):
+            try:
+                v = float(val or 0)
+                if v > 0:
+                    return "color: #d62728; font-weight: 600;"
+                elif v < 0:
+                    return "color: #2ca02c; font-weight: 600;"
+            except Exception:
+                pass
+            return ""
+
+        df_display = df.drop(columns=["signal_key"]).copy()
+        df_style = df_display.style.apply(_row_color, axis=1)
+        df_style = df_style.map(_pct_color, subset=["涨跌幅%"])
 
         st.dataframe(
-            styled,
+            df_style,
             use_container_width=True,
-            height=900,
+            height=760,
             column_config={
                 "市场": st.column_config.Column("市场", width="small"),
-                "代码": st.column_config.Column("代码", width="medium"),
+                "代码": st.column_config.Column("代码", width="small"),
                 "名称": st.column_config.Column("名称", width="medium"),
                 "环节": st.column_config.Column("环节", width="medium"),
-                "总分": st.column_config.NumberColumn("总分 ⭐", min_value=0, max_value=100, format="%.2f", width="small"),
+                "总分": st.column_config.NumberColumn("总分 ⭐", min_value=0, max_value=100, format="%.1f", width="small"),
                 "信号": st.column_config.Column("信号", width="small"),
                 "涨跌幅%": st.column_config.NumberColumn("涨跌%", format="%.2f%%", width="small"),
-                "MA 得分": st.column_config.NumberColumn("MA", format="%.1f", width="small"),
-                "MACD 得分": st.column_config.NumberColumn("MACD", format="%.1f", width="small"),
-                "RSI 得分": st.column_config.NumberColumn("RSI", format="%.1f", width="small"),
-                "布林带得分": st.column_config.NumberColumn("BOLL", format="%.1f", width="small"),
-                "量能得分": st.column_config.NumberColumn("VOL", format="%.1f", width="small"),
-                "KDJ 得分": st.column_config.NumberColumn("KDJ", format="%.1f", width="small"),
+                "MA 得分": st.column_config.NumberColumn("MA", format="%.0f", width="small"),
+                "MACD 得分": st.column_config.NumberColumn("MACD", format="%.0f", width="small"),
+                "RSI 得分": st.column_config.NumberColumn("RSI", format="%.0f", width="small"),
+                "布林带得分": st.column_config.NumberColumn("BOLL", format="%.0f", width="small"),
+                "量能得分": st.column_config.NumberColumn("VOL", format="%.0f", width="small"),
+                "KDJ 得分": st.column_config.NumberColumn("KDJ", format="%.0f", width="small"),
             },
             hide_index=True,
         )
@@ -477,3 +490,17 @@ with c_right:
         """,
         unsafe_allow_html=True,
     )
+
+# -----------------------------------------------------------------------------
+# 6. 自动刷新：评分任务进行中时，每 15 秒自动刷新一次页面
+#    （页面渲染完成后才 sleep，所以用户 15 秒内可正常交互，到期后自动拉取增量结果）
+# -----------------------------------------------------------------------------
+if _BACKEND_OK and sch:
+    _auto_prog = sch.get_progress() or {}
+    if _auto_prog.get("running") and int(_auto_prog.get("total", 0) or 0) > 0:
+        _auto_done = int(_auto_prog.get("done", 0) or 0)
+        _auto_total = int(_auto_prog.get("total", 0) or 0)
+        if _auto_done < _auto_total:
+            with st.spinner(f"🔄 评分进行中（{_auto_done}/{_auto_total}），15 秒后自动刷新结果..."):
+                time.sleep(15)
+            st.rerun()
