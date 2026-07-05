@@ -115,11 +115,17 @@ def _cached_scores(force_hash: str) -> Dict[str, Any]:
     """
     缓存评分结果 6 小时；force_hash 作为强制刷新的触发器
     （每次用户点刷新按钮 force_hash 变，缓存就失效）
+
+    关键：使用 scoring_scheduler.get_current_result() 而非 run_scoring！
+    - 当后台线程正在评分 (running=True) 时，run_scoring(use_thread=False) 会阻塞等待
+      全部 157 只完成，导致用户看到进度条但表格/KPI迟迟不出现（用户以为是 Bug）。
+    - get_current_result() 只读内存中的 _last_result（_flush_partial 每完成 1 只就更新）
+      + 缓存文件，0.01 秒内返回【增量结果】，出了多少只就立刻显示多少只，
+      完全不阻塞，用户体验丝滑。
     """
     if not _BACKEND_OK:
         return {"results": [], "pool_size": 0, "scored_count": 0, "updated_at": "", "from_cache": False}
-    # 用 scoring_scheduler.run_scoring 读缓存/触发，但不开启新线程（这里是读路径）
-    return sch.run_scoring(force_refresh=False, use_thread=False) or {}
+    return sch.get_current_result() or {}
 
 
 def _fetch_scores() -> Dict[str, Any]:
