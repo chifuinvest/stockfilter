@@ -228,10 +228,16 @@ def api_stocks_remove():
 
 def _parse_args():
     p = argparse.ArgumentParser(description="AI 产业链全市场量化监控系统")
-    p.add_argument("--port", type=int, default=5000, help="Flask 监听端口 (默认 5000)")
-    p.add_argument("--host", type=str, default="0.0.0.0", help="Flask 监听地址")
+    p.add_argument(
+        "--port",
+        type=int,
+        default=int(os.environ.get("PORT", "5000")),
+        help="Flask 监听端口 (默认 5000，Railway/云平台会通过 $PORT 注入)",
+    )
+    p.add_argument("--host", type=str, default=os.environ.get("HOST", "0.0.0.0"),
+                   help="Flask 监听地址")
     p.add_argument("--skip-first-score", action="store_true",
-                   help="跳过启动时的首轮评分（用缓存即可）")
+                   help="跳过启动时的首轮评分（用缓存即可；生产部署推荐开启，避免启动超时）")
     return p.parse_args()
 
 

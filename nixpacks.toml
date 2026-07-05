@@ -1,0 +1,17 @@
+[phases.setup]
+  nixPkgs = ["...", "python311", "python311Packages.pip"]
+  # 可选：如需 Tushare 正常写 HOME/tk.csv，可在这里显式指定 HOME（不过 Railway 容器默认 HOME=/app 可写，通常无需）
+  # env = ["HOME=/app"]
+
+[phases.install]
+  cmds = [
+    "python -m venv venv || true",
+    "./venv/bin/pip install --upgrade pip",
+    "./venv/bin/pip install -r requirements.txt"
+  ]
+
+[phases.build]
+  cmds = ["echo '构建完成，无需额外构建步骤'"]
+
+[start]
+  cmd = "./venv/bin/gunicorn main:app -b 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 300 --preload --access-logfile - --error-logfile -"
