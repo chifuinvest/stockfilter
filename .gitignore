@@ -1,0 +1,66 @@
+# ============================================================
+#  AI 产业链量化监控系统 · .gitignore
+#  提交前务必确认：真实 token / 密钥 / 缓存 / 日志 不会被提交
+# ============================================================
+
+# ----- 敏感信息（绝对不能提交！）-----
+.env
+.env.*
+!.env.example
+!.env.template
+token.txt
+*.pem
+*.key
+.secrets
+.github-publish.env
+
+# ----- Tushare / yfinance 本地缓存（体积大，不需要提交） -----
+data_cache/
+data/
+output/
+
+# ----- yfinance SQLite 缓存 + 运行时缓存 -----
+*.sqlite
+*.sqlite3
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+*.so
+
+# ----- 运行日志与临时脚本（都是调试过程文件） -----
+_flask.log
+_run_*.py
+_run_*.ps1
+_test_*.py
+_collect_report.*
+_probe_*.py
+generate_mock_dataset.py
+
+# ----- IDE / 编辑器 -----
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ----- 虚拟环境 -----
+venv/
+venv.*
+.venv/
+env/
+ENV/
+
+# ----- pytest / coverage -----
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+
+# ----- 备份与临时 -----
+*.bak
+*.tmp
+*.backup
