@@ -8,7 +8,7 @@
 #     **不构成任何投资建议或承诺**。市场有风险，投资需谨慎，任何基于
 #     本系统进行的实盘交易行为盈亏自负，作者及版权方不承担任何法律责任。
 #
-# 版权所有 (c) 2025 Yan Ying
+# 版权所有 (c) 2025 Bart
 # 联系方式：yanying76@gmail.com
 # =============================================================================
 import os
@@ -458,7 +458,7 @@ with c_right:
         """
         <div style="color:#6c757d;font-size:14px;line-height:1.6;text-align:right;">
           <p style="font-weight:600;margin-bottom:8px;color:#212529;">© 版权信息</p>
-          <p style="margin:0 0 6px 0;">&copy; 2025 <b>Yan Ying</b><br>All rights reserved.</p>
+          <p style="margin:0 0 6px 0;">&copy; 2025 <b>Bart</b><br>All rights reserved.</p>
           <p style="margin:0;">
             📧 联系方式：<a href="mailto:yanying76@gmail.com">yanying76@gmail.com</a>
           </p>

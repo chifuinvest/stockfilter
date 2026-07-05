@@ -122,6 +122,6 @@ https://zeabur.com/new?repository=chifuinvest%2Fstockfilter&branch=main&type=fro
 市场有风险，投资需谨慎。任何单位或个人基于本系统进行的实盘交易行为，盈亏自负，本项目作者及版权方**不承担任何直接或间接的法律责任与经济损失**。
 
 ### 版权信息
-&copy; 2025 **Yan Ying**. All rights reserved.
+&copy; 2025 **Bart**. All rights reserved.
 
 📧 **联系方式：** [yanying76@gmail.com](mailto:yanying76@gmail.com)
