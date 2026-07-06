@@ -444,7 +444,7 @@ if _BACKEND_OK:
             for _r in _raw:
                 _p = str(_r.get("path", ""))
                 # 缩短路径展示
-                for _short in (str(_BASE_DIR), os.environ.get("HOME") or "/home"):
+                for _short in (str(BASE_DIR), os.environ.get("HOME") or "/home"):
                     if _short and _p.startswith(_short):
                         _p = "..." + _p[len(_short):]
                         break
