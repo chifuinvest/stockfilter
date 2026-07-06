@@ -8,7 +8,8 @@
 #   --preload     预加载 app，减少 Worker 启动时间
 web: gunicorn main:app \
   -b 0.0.0.0:$PORT \
-  --workers 2 \
+  --worker-class gthread \
+  --workers 1 \
   --threads 4 \
   --timeout 300 \
   --preload \

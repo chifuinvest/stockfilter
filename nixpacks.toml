@@ -14,4 +14,4 @@
   cmds = ["echo '构建完成，无需额外构建步骤'"]
 
 [start]
-  cmd = "./venv/bin/gunicorn main:app -b 0.0.0.0:$PORT --workers 2 --threads 4 --timeout 300 --preload --access-logfile - --error-logfile -"
+  cmd = "./venv/bin/gunicorn main:app -b 0.0.0.0:$PORT --worker-class gthread --workers 1 --threads 4 --timeout 300 --preload --access-logfile - --error-logfile -"
