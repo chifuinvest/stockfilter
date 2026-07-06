@@ -37,12 +37,14 @@ _PROGRESS_CACHE_PATH = _BASE_DIR / "data_cache" / "progress_v2.pkl"
 _ALT_CACHE_DIRS: List[Path] = []
 
 def _init_cache_dirs() -> List[Path]:
-    """返回按优先级排序的可写缓存目录列表（多路径兜底，防止 Streamlit 容器 /app 不可写）"""
+    """返回按优先级排序的可写缓存目录列表（多路径兜底，防止 Streamlit 容器 /app 不可写）
+    保证至少返回 1 个可写目录；若标准路径都失败，则落到 CWD/tmp_cache（绝对不会拿不到写权限）。"""
     candidates: List[Path] = []
     candidates.append(_BASE_DIR / "data_cache")
-    _home = Path(os.environ.get("HOME") or os.environ.get("USERPROFILE") or Path.home())
+    _home = Path(os.environ.get("HOME") or os.environ.get("USERPROFILE") or (Path.cwd() / "_userhome"))
     candidates.append(_home / ".cache" / "stockfilter")
     candidates.append(Path(os.environ.get("TMPDIR") or os.environ.get("TEMP") or os.environ.get("TMP") or "/tmp") / "stockfilter_cache")
+    candidates.append(Path.cwd() / "data_cache_runtime")  # 终极兜底: 当前工作目录的运行时缓存（一定在可写运行目录）
     ok_dirs: List[Path] = []
     for p in candidates:
         try:
@@ -54,11 +56,14 @@ def _init_cache_dirs() -> List[Path]:
         except Exception:
             continue
     if not ok_dirs:
+        # 不可能走到这里: CWD一定可写，除非文件系统挂了
         try:
             (_BASE_DIR / "data_cache").mkdir(parents=True, exist_ok=True)
             ok_dirs.append(_BASE_DIR / "data_cache")
         except Exception:
-            pass
+            p_fallback = Path.cwd() / "data_cache_runtime"
+            p_fallback.mkdir(parents=True, exist_ok=True)
+            ok_dirs.append(p_fallback)
     return ok_dirs
 
 _ALT_CACHE_DIRS = _init_cache_dirs()
@@ -321,12 +326,15 @@ def _progress_cb(done, total, ok, fail, wait_msg: Optional[str] = None, wait_rem
 
 def run_scoring(force_refresh: bool = False, use_thread: bool = True) -> Dict[str, Any]:
     """
-    执行全量评分。若已在运行中则直接返回当前结果。
+    执行全量评分。若已在运行中则直接返回当前结果（force_refresh=True 时会强制执行，重启评分）。
     先读缓存，缓存可用且非强制刷新则返回缓存。
     """
     global _last_result, _last_progress
     with _lock:
-        if _last_progress.get("running"):
+        # 🔧 关键修复：force_refresh=True 时跳过"正在运行中"守卫
+        #   - 前序评分线程可能是死线程（worker重启/崩溃留下的僵尸running=True），用户明确点强制重评分就是要重启
+        #   - 非 force_refresh 的常规触发路径仍保留守卫防止重复提交
+        if (not force_refresh) and _last_progress.get("running"):
             return {"status": "running", "progress": dict(_last_progress), **_last_result}
 
         if not force_refresh:
@@ -354,188 +362,218 @@ def run_scoring(force_refresh: bool = False, use_thread: bool = True) -> Dict[st
 
 def _do_run_scoring(force_refresh: bool) -> Dict[str, Any]:
     global _last_result, _last_progress
-    pool = load_stock_pool()
-    flat = flatten_pool(pool)
-    N = len(flat)
-    _init_prog = {"running": True, "done": 0, "total": N, "ok": 0, "fail": 0}
-    with _lock:
-        _last_progress = dict(_init_prog)
-    try:
-        _write_progress_cache(_init_prog)
-    except Exception:
-        pass
-
-    logger.info(f"开始增量评分: {N} 只股票（强制刷新={force_refresh}）")
-
+    pool: Dict[str, Any] = {"US": [], "CN": [], "HK": [], "KR": []}   # type: ignore[assignment]
+    flat: List[Dict[str, str]] = []
+    N = 0
+    ok = fail = 0
     results: List[Dict[str, Any]] = []
     failures: List[Dict[str, Any]] = []
-    ok = fail = 0
-    # 港股调用节奏控制：Tushare hk_daily 免费额度仅 1次/分钟
-    # 关键：等待放在 pool.submit() 之前，不计入 60~120s 单票超时预算，防止港股 100% 被超时杀死
-    _last_hk_end_ts = 0.0
-    _HK_MIN_INTERVAL_SECONDS = 66  # 60s窗口+6s冗余
-
-    def _flush_partial():
-        sorted_results = sorted(results, key=lambda r: (r.get("total_score", -1) or -1), reverse=True)
-        stats = _calc_stats(sorted_results)
-        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        payload = {
-            "results": sorted_results,
-            "stats": stats,
-            "updated_at": updated_at,
-            "pool_size": count_pool(pool),
-            "scored_count": len(sorted_results),
-            "partial": True,
-            "failures": [dict(f) for f in failures],
-            "failure_count": len(failures),
-        }
-        _write_score_cache(payload)
+    thread_failed = False
+    thread_error_msg: Optional[str] = None
+    try:
+        # ========= 加载股票池（如果这里就失败也能被finally兜住） =========
+        try:
+            pool = load_stock_pool()
+        except Exception as _le:
+            raise RuntimeError(f"加载股票池失败: {_le}") from _le
+        flat = flatten_pool(pool)
+        N = len(flat)
+        if N == 0:
+            raise RuntimeError("股票池为空，请先添加股票")
+        _init_prog = {"running": True, "done": 0, "total": N, "ok": 0, "fail": 0}
         with _lock:
-            _last_result = payload
+            _last_progress = dict(_init_prog)
+        try:
+            _write_progress_cache(_init_prog)
+        except Exception:
+            pass
 
-    # ===== 单票超时：120 秒（给 US/KR Yahoo 重试留出空间；港股配额等待已在 submit 之前完成，不算在超时里）=====
-    _SINGLE_TICKET_TIMEOUT_SECONDS = 120
-    # 提供给 data_fetcher_v2 长 sleep（港股配额等待等）时调用的全局进度通知
-    import data_fetcher_v2 as _dfv2
-    if not getattr(_dfv2, "_progress_wait_hook", None):
-        def _hook(msg, remaining):
-            _progress_cb(max(0, idx-1), N, ok, fail, wait_msg=msg, wait_remaining_seconds=int(remaining))
-        _dfv2._progress_wait_hook = _hook
+        logger.info(f"开始增量评分: {N} 只股票（强制刷新={force_refresh}）")
 
-    def _track_fail(code_, name_, market_, reason_):
-        """统一失败追踪：UI 能显示具体是哪只、什么原因失败"""
-        nonlocal fail
-        fail += 1
-        failures.append({
-            "code": str(code_),
-            "name": str(name_ or code_),
-            "market": str(market_ or ""),
-            "reason": str(reason_)[:200],
-            "time": datetime.now().strftime("%H:%M:%S"),
-        })
+        results = []
+        failures = []
+        ok = fail = 0
+        # 港股调用节奏控制：Tushare hk_daily 免费额度仅 1次/分钟
+        # 关键：等待放在 pool.submit() 之前，不计入 60~120s 单票超时预算，防止港股 100% 被超时杀死
+        _last_hk_end_ts = 0.0
+        _HK_MIN_INTERVAL_SECONDS = 66  # 60s窗口+6s冗余
 
-    def _process_one(meta_dict):
-        """单线程内处理 1 只股票：fetch → 评分 → 返回结果。被 ThreadPoolExecutor 包装加 120s 总超时。
-           注意：市场级配额等待（港股分钟级配额）已经在调用此函数前于主线程 sleep 完成，不计入超时预算。
-        """
-        code_one = meta_dict["code"]
-        mkt = meta_dict.get("market", "")
-        name_one = meta_dict.get("name", code_one)
-        df_one = fetch_single_price(code_one, force_refresh=force_refresh)
-        scored_one = None
-        if df_one is not None:
-            scored_one = score_single(df_one)
-        # 透传：如果 fetch 没报错但返回 None，把"空数据"的原因名也带出去让上层分类
-        reason = None
-        if scored_one is None and df_one is None:
-            reason = "fetch返回空数据（接口限流/429/代码映射错误/Tushare超限？）"
-        return scored_one, mkt, meta_dict, reason
-
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="score_worker") as pool:
-        for idx, meta in enumerate(flat, start=1):
-            code = meta["code"]
-            name = meta.get("name", code)
-            mkt = meta.get("market", "")
+        def _flush_partial():
+            sorted_results = sorted(results, key=lambda r: (r.get("total_score", -1) or -1), reverse=True)
+            stats = _calc_stats(sorted_results)
+            updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            payload = {
+                "results": sorted_results,
+                "stats": stats,
+                "updated_at": updated_at,
+                "pool_size": count_pool(pool),
+                "scored_count": len(sorted_results),
+                "partial": True,
+                "failures": [dict(f) for f in failures],
+                "failure_count": len(failures),
+            }
             try:
-                # ============================================================
-                # 【HK 配额等待 BEFORE submit】—— 关键：不算入单票超时预算
-                # ============================================================
-                if mkt == "HK" and _last_hk_end_ts > 0:
-                    elapsed = time.time() - _last_hk_end_ts
-                    wait_needed = _HK_MIN_INTERVAL_SECONDS - elapsed
-                    if wait_needed > 0:
-                        logger.info(f"[HK节奏] 距上次港股完成 {elapsed:.1f}s，还需等待 {wait_needed:.0f}s 再处理 {code}")
-                        _rem_total = int(wait_needed)
-                        _tick = 2
-                        while _rem_total > 0:
-                            try:
-                                _cur_prog_pause = {
-                                    "running": True, "done": idx-1, "total": N, "ok": ok, "fail": fail,
-                                    "wait_msg": "Tushare 港股接口配额等待（1次/分钟）",
-                                    "wait_remaining_seconds": _rem_total,
-                                }
-                                with _lock:
-                                    _last_progress = dict(_cur_prog_pause)
+                _write_score_cache(payload)
+            except Exception as _wse:
+                logger.warning(f"[partial]写scores缓存失败(不中断评分): {_wse}")
+            with _lock:
+                _last_result = payload
+
+        # ===== 单票超时：120 秒（给 US/KR Yahoo 重试留出空间；港股配额等待已在 submit 之前完成，不算在超时里）=====
+        _SINGLE_TICKET_TIMEOUT_SECONDS = 120
+        # 提供给 data_fetcher_v2 长 sleep（港股配额等待等）时调用的全局进度通知
+        import data_fetcher_v2 as _dfv2
+        if not getattr(_dfv2, "_progress_wait_hook", None):
+            def _hook(msg, remaining):
+                _progress_cb(0 if (not isinstance(flat, list) or not flat) else max(0, len(flat)),
+                             N, ok, fail, wait_msg=msg, wait_remaining_seconds=int(remaining))
+            _dfv2._progress_wait_hook = _hook
+
+        def _track_fail(code_, name_, market_, reason_):
+            nonlocal fail
+            fail += 1
+            failures.append({
+                "code": str(code_),
+                "name": str(name_ or code_),
+                "market": str(market_ or ""),
+                "reason": str(reason_)[:200],
+                "time": datetime.now().strftime("%H:%M:%S"),
+            })
+
+        def _process_one(meta_dict):
+            code_one = meta_dict["code"]
+            mkt = meta_dict.get("market", "")
+            name_one = meta_dict.get("name", code_one)
+            df_one = fetch_single_price(code_one, force_refresh=force_refresh)
+            scored_one = None
+            if df_one is not None:
+                scored_one = score_single(df_one)
+            reason = None
+            if scored_one is None and df_one is None:
+                reason = "fetch返回空数据（接口限流/429/代码映射错误/Tushare超限？）"
+            return scored_one, mkt, meta_dict, reason
+
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="score_worker") as pool_exec:
+            for idx, meta in enumerate(flat, start=1):
+                code = meta["code"]
+                name = meta.get("name", code)
+                mkt = meta.get("market", "")
+                try:
+                    # HK 配额等待 BEFORE submit —— 关键：不算入单票超时预算
+                    if mkt == "HK" and _last_hk_end_ts > 0:
+                        elapsed = time.time() - _last_hk_end_ts
+                        wait_needed = _HK_MIN_INTERVAL_SECONDS - elapsed
+                        if wait_needed > 0:
+                            logger.info(f"[HK节奏] 距上次港股完成 {elapsed:.1f}s，还需等待 {wait_needed:.0f}s 再处理 {code}")
+                            _rem_total = int(wait_needed)
+                            _tick = 2
+                            while _rem_total > 0:
                                 try:
-                                    _write_progress_cache(_cur_prog_pause)
+                                    _cur_prog_pause = {
+                                        "running": True, "done": idx-1, "total": N, "ok": ok, "fail": fail,
+                                        "wait_msg": "Tushare 港股接口配额等待（1次/分钟）",
+                                        "wait_remaining_seconds": _rem_total,
+                                    }
+                                    with _lock:
+                                        _last_progress = dict(_cur_prog_pause)
+                                    try:
+                                        _write_progress_cache(_cur_prog_pause)
+                                    except Exception:
+                                        pass
                                 except Exception:
                                     pass
-                            except Exception:
-                                pass
-                            time.sleep(_tick)
-                            _rem_total = max(0, _rem_total - _tick)
-                # ---------- 正式提交处理（港股配额等完了，才进入120s超时倒计时）----------
-                future = pool.submit(_process_one, meta)
-                scored, _, _meta, empty_reason = future.result(timeout=_SINGLE_TICKET_TIMEOUT_SECONDS)
-                if mkt == "HK":
-                    _last_hk_end_ts = time.time()
-                if scored is not None:
-                    record = {
-                        "market": _meta.get("market", ""),
-                        "market_label": _MARKET_LABEL.get(_meta.get("market", ""), _meta.get("market", "")),
-                        "code": code,
-                        "name": _meta.get("name", code),
-                        "sector": _meta.get("sector", "其他"),
-                        **scored,
-                    }
-                    results.append(record)
-                    ok += 1
-                else:
-                    _track_fail(code, name, mkt, empty_reason or "score_single返回None（K线不足/全为NaN？）")
-            except FuturesTimeoutError:
-                logger.warning(f"单票超时({_SINGLE_TICKET_TIMEOUT_SECONDS}s)，标记失败并跳过：{mkt}:{code}")
-                if mkt == "HK":
-                    _last_hk_end_ts = time.time()
-                _track_fail(code, name, mkt, f"单票处理超时>{_SINGLE_TICKET_TIMEOUT_SECONDS}s（网络阻塞/Yahoo卡住/配额卡死）")
-            except Exception as e:
-                logger.exception(f"评分异常 {mkt}:{code}: {e}")
-                if mkt == "HK":
-                    _last_hk_end_ts = time.time()
-                _track_fail(code, name, mkt, f"异常: {type(e).__name__}: {str(e)[:160]}")
-            finally:
-                try:
-                    _cur_prog = {
-                        "running": True, "done": idx, "total": N, "ok": ok, "fail": fail,
-                        "failure_count": len(failures),
-                    }
-                    with _lock:
-                        _last_progress = dict(_cur_prog)
+                                time.sleep(_tick)
+                                _rem_total = max(0, _rem_total - _tick)
+                    future = pool_exec.submit(_process_one, meta)
+                    scored, _, _meta, empty_reason = future.result(timeout=_SINGLE_TICKET_TIMEOUT_SECONDS)
+                    if mkt == "HK":
+                        _last_hk_end_ts = time.time()
+                    if scored is not None:
+                        record = {
+                            "market": _meta.get("market", ""),
+                            "market_label": _MARKET_LABEL.get(_meta.get("market", ""), _meta.get("market", "")),
+                            "code": code,
+                            "name": _meta.get("name", code),
+                            "sector": _meta.get("sector", "其他"),
+                            **scored,
+                        }
+                        results.append(record)
+                        ok += 1
+                    else:
+                        _track_fail(code, name, mkt, empty_reason or "score_single返回None（K线不足/全为NaN？）")
+                except FuturesTimeoutError:
+                    logger.warning(f"单票超时({_SINGLE_TICKET_TIMEOUT_SECONDS}s)，标记失败并跳过：{mkt}:{code}")
+                    if mkt == "HK":
+                        _last_hk_end_ts = time.time()
+                    _track_fail(code, name, mkt, f"单票处理超时>{_SINGLE_TICKET_TIMEOUT_SECONDS}s（网络阻塞/Yahoo卡住/配额卡死）")
+                except Exception as e:
+                    logger.exception(f"评分异常 {mkt}:{code}: {e}")
+                    if mkt == "HK":
+                        _last_hk_end_ts = time.time()
+                    _track_fail(code, name, mkt, f"异常: {type(e).__name__}: {str(e)[:160]}")
+                finally:
                     try:
-                        _write_progress_cache(_cur_prog)
-                    except Exception:
-                        pass
-                    _flush_partial()
-                except Exception as fe:
-                    logger.warning(f"进度/缓存写入异常({code}): {fe}")
-
-    sorted_results = sorted(results, key=lambda r: (r.get("total_score", -1) or -1), reverse=True)
-    stats = _calc_stats(sorted_results)
-    updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    payload = {
-        "results": sorted_results,
-        "stats": stats,
-        "updated_at": updated_at,
-        "pool_size": count_pool(pool),
-        "scored_count": len(sorted_results),
-        "failures": [dict(f) for f in failures],
-        "failure_count": len(failures),
-    }
-    _write_score_cache(payload)
-    _final_prog = {
-        "running": False, "done": N, "total": N, "ok": ok, "fail": fail,
-        "failure_count": len(failures),
-    }
-    with _lock:
-        _last_result = payload
-        _last_progress = dict(_final_prog)
-    try:
-        _write_progress_cache(_final_prog)
-    except Exception:
-        pass
-    logger.info(f"评分完成: {ok}/{N} 成功, {fail} 失败 (failures清单{len(failures)}条), 更新时间 {updated_at}")
-    return {"status": "ok", "from_cache": False, **payload}
-
-
+                        _cur_prog = {
+                            "running": True, "done": idx, "total": N, "ok": ok, "fail": fail,
+                            "failure_count": len(failures),
+                        }
+                        with _lock:
+                            _last_progress = dict(_cur_prog)
+                        try:
+                            _write_progress_cache(_cur_prog)
+                        except Exception:
+                            pass
+                        _flush_partial()
+                    except Exception as fe:
+                        logger.warning(f"进度/缓存写入异常({code}): {fe}")
+    except Exception as _toplevel_e:
+        thread_failed = True
+        thread_error_msg = f"{type(_toplevel_e).__name__}: {str(_toplevel_e)[:300]}"
+        logger.exception(f"[FATAL]评分线程顶层异常, 立即终止并写收尾: {_toplevel_e}")
+    finally:
+        # 🔧 终极兜底：任何情况下（成功/崩溃/异常）都把 running=False 写出去，
+        #    杜绝"进度永远 running=True 导致点击强制重评分也动不了"的死锁场景
+        _actual_done = (ok + fail)
+        _total_for_final = N if N > 0 else max(1, _actual_done)
+        sorted_final = sorted(results, key=lambda r: (r.get("total_score", -1) or -1), reverse=True)
+        stats_final = _calc_stats(sorted_final)
+        updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            _ps = count_pool(pool) if isinstance(pool, dict) else (len(flat) if isinstance(flat, list) else 157)
+        except Exception:
+            _ps = len(flat) if isinstance(flat, list) else 157
+        payload = {
+            "results": sorted_final,
+            "stats": stats_final,
+            "updated_at": updated_at,
+            "pool_size": _ps,
+            "scored_count": len(sorted_final),
+            "partial": thread_failed or _actual_done < _total_for_final,
+            "failures": [dict(f) for f in failures],
+            "failure_count": len(failures),
+            "fatal_error": thread_error_msg,
+        }
+        try:
+            _write_score_cache(payload)
+        except Exception as _fse:
+            logger.warning(f"[final]写scores缓存失败: {_fse}")
+        _final_prog = {
+            "running": False, "done": _actual_done, "total": _total_for_final, "ok": ok, "fail": fail,
+            "failure_count": len(failures),
+            "fatal_error": thread_error_msg,
+        }
+        with _lock:
+            _last_result = payload
+            _last_progress = dict(_final_prog)
+        try:
+            _write_progress_cache(_final_prog)
+        except Exception:
+            pass
+        if thread_failed:
+            logger.error(f"评分线程异常终止: 已完成 {ok}/{_total_for_final} 成功, {fail} 失败 (fatal={thread_error_msg})")
+            return {"status": "error", "error": thread_error_msg, **payload}
+        logger.info(f"评分完成: {ok}/{_total_for_final} 成功, {fail} 失败 (failures清单{len(failures)}条), 更新时间 {updated_at}")
+        return {"status": "ok", "from_cache": False, **payload}
 def _calc_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     dist = {"BUY": 0, "HOLD": 0, "WATCH": 0, "REDUCE": 0, "AVOID": 0}
     avg_score = 0.0
