@@ -364,10 +364,13 @@ def score_single(df: pd.DataFrame) -> Optional[Dict[str, Any]]:
             "total_score": total,
             "score_ma": s_ma, "score_macd": s_macd, "score_rsi": s_rsi,
             "score_boll": s_boll, "score_volume": s_vol, "score_kdj": s_kdj,
+            "ma_score": s_ma, "macd_score": s_macd, "rsi_score": s_rsi,
+            "boll_score": s_boll, "vol_score": s_vol, "kdj_score": s_kdj,
             "sub_ma": round(sub_ma, 1), "sub_macd": round(sub_macd, 1),
             "sub_rsi": round(sub_rsi, 1), "sub_boll": round(sub_boll, 1),
             "sub_volume": round(sub_vol, 1), "sub_kdj": round(sub_kdj, 1),
             **sig,
+            "signal": sig.get("level", "WATCH"),
             "price": round(ind["price"], 4) if np.isfinite(ind["price"]) else None,
             "rsi_value": round(ind["rsi"], 2) if np.isfinite(ind["rsi"]) else None,
             "dif_value": round(ind["dif"], 4) if np.isfinite(ind["dif"]) else None,
@@ -386,6 +389,7 @@ def score_single(df: pd.DataFrame) -> Optional[Dict[str, Any]]:
             "bb_lower": round(ind["bb_lower"], 4) if np.isfinite(ind["bb_lower"]) else None,
             "pct_1d": pct_1d, "pct_7d": pct_7d,
             "pct_30d": pct_30d, "pct_1y": pct_1y,
+            "pct_change": pct_1d if pct_1d is not None else (pct_7d if pct_7d is not None else 0),
         }
     except Exception as e:
         logger.exception(f"评分异常: {e}")
