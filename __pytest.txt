@@ -1,0 +1,39 @@
+=== Direct python probe via absolute paths === 
+[FOUND] C:\Program Files\Python311\python.exe 
+'C:\Program' is not recognized as an internal or external command,
+operable program or batch file.
+         version probe FAILED with errorlevel=9009 
+[MISS ] C:\Program Files\Python311\python.exe 
+[FOUND] C:\Program Files\Python312\python.exe 
+'C:\Program' is not recognized as an internal or external command,
+operable program or batch file.
+         version probe FAILED with errorlevel=9009 
+[MISS ] C:\Program Files\Python312\python.exe 
+[FOUND] C:\Program Files\Python39\python.exe 
+'C:\Program' is not recognized as an internal or external command,
+operable program or batch file.
+         version probe FAILED with errorlevel=9009 
+[MISS ] C:\Program Files\Python39\python.exe 
+[FOUND] C:\Program Files (x86)\Python311\python.exe 
+'C:\Program' is not recognized as an internal or external command,
+operable program or batch file.
+         version probe FAILED with errorlevel=9009 
+[MISS ] C:\Program Files (x86)\Python311\python.exe 
+[MISS ] C:\Users\Bart\AppData\Local\Programs\Python\Python311\python.exe 
+[MISS ] C:\Users\Bart\AppData\Local\Programs\Python\Python312\python.exe 
+[MISS ] C:\Users\Bart\AppData\Local\Programs\Python\Python310\python.exe 
+[MISS ] C:\Users\Bart\AppData\Local\Programs\Python\Python39\python.exe 
+[MISS ] C:\Python311\python.exe 
+ 
+=== PATH-based where.exe python === 
+C:\Users\Bart\AppData\Local\Microsoft\WindowsApps\python.exe
+ 
+=== DIR C:\Program Files directories starting with P === 
+ 
+=== DIR C:\Users\Bart\AppData\Local\Programs === 
+Common
+Python
+Qianwen
+QianwenApp
+TikeTiciqi
+--- DONE --- 

@@ -1,8 +1,15 @@
-flask>=3.0.0
-yfinance>=0.2.38
-pandas>=2.0.0
-numpy>=1.24.0
+# ⚡ 股票分析系统 · 依赖清单（Streamlit Community Cloud 100%兼容）
+# 说明：
+#   - 无需 TA-Lib！所有技术指标（MA/MACD/RSI/KDJ/BOLL/量能）均用 pandas/numpy 原生实现，
+#     完全避免了 Streamlit Cloud 上 TA-Lib 编译失败的老大难问题 ✅
+#   - tushare 为可选（A/H 股财报更精准），未配置 token 时会自动降级到 Yahoo Finance，不报错
+#   - loguru 为可选日志美化包，缺失时自动退回 Python 标准 logging，不影响运行
+
+streamlit>=1.30.0,<2.0.0
+pandas>=2.0.0,<3.0.0
+numpy>=1.24.0,<2.1.0
+yfinance>=0.2.40,<0.3.0
+tushare>=1.4.0
 loguru>=0.7.0
-tushare>=1.2.89
-gunicorn>=21.2.0
-streamlit>=1.32.0
+requests>=2.31.0
+pytz>=2024.1

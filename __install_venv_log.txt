@@ -1,0 +1,42 @@
+====================================================== 
+  Venv create + requirements install (TUNA mirror)     
+====================================================== 
+ 
+[1/6] Python3.14 --version 
+Python 3.14.4
+ 
+[2/6] Creating venv at c:\Users\Bart\Documents\trae_projects\stockfilter\.venv 
+  venv create exitcode=0 
+ 
+[3/6] Venv python --version 
+Python 3.14.4
+  venv python exitcode=0 
+ 
+[4/6] Upgrading pip via TUNA mirror 
+Looking in indexes: https://pypi.tuna.tsinghua.edu.cn/simple
+Requirement already satisfied: pip in .\.venv\Lib\site-packages (26.0.1)
+WARNING: Retrying (Retry(total=4, connect=None, read=None, redirect=None, status=None)) after connection broken by 'ReadTimeoutError("HTTPSConnectionPool(host='pypi.tuna.tsinghua.edu.cn', port=443): Read timed out. (read timeout=15)")': /simple/pip/
+WARNING: Retrying (Retry(total=3, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x00000278C6D1D450>: Failed to establish a new connection: [Errno 11001] getaddrinfo failed')': /simple/pip/
+WARNING: Retrying (Retry(total=2, connect=None, read=None, redirect=None, status=None)) after connection broken by 'NewConnectionError('<pip._vendor.urllib3.connection.HTTPSConnection object at 0x00000278C6D1D590>: Failed to establish a new connection: [Errno 11001] getaddrinfo failed')': /simple/pip/
+Collecting pip
+  ERROR: HTTP error 403 while getting https://pypi.tuna.tsinghua.edu.cn/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl (from https://pypi.tuna.tsinghua.edu.cn/simple/pip/) (requires-python:>=3.10)
+ERROR: Could not install requirement pip from https://pypi.tuna.tsinghua.edu.cn/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl because of HTTP error 403 Client Error: Forbidden for url: https://pypi.tuna.tsinghua.edu.cn/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl for URL https://pypi.tuna.tsinghua.edu.cn/packages/5d/95/6b5cb3461ea5673ba0995989746db58eb18b91b54dbf331e72f569540946/pip-26.1.2-py3-none-any.whl (from https://pypi.tuna.tsinghua.edu.cn/simple/pip/) (requires-python:>=3.10)
+  pip upgrade exitcode=1 
+ 
+[5/6] Installing requirements via TUNA mirror (2-10x faster!) 
+Looking in indexes: https://pypi.tuna.tsinghua.edu.cn/simple
+Collecting flask>=3.0.0 (from -r c:\Users\Bart\Documents\trae_projects\stockfilter\requirements.txt (line 1))
+  ERROR: HTTP error 403 while getting https://pypi.tuna.tsinghua.edu.cn/packages/7f/9c/34f6962f9b9e9c71f6e5ed806e0d0ff03c9d1b0b2340088a0cf4bce09b18/flask-3.1.3-py3-none-any.whl (from https://pypi.tuna.tsinghua.edu.cn/simple/flask/) (requires-python:>=3.9)
+
+[notice] A new release of pip is available: 26.0.1 -> 26.1.2
+[notice] To update, run: c:\Users\Bart\Documents\trae_projects\stockfilter\.venv\Scripts\python.exe -m pip install --upgrade pip
+ERROR: Could not install requirement flask>=3.0.0 from https://pypi.tuna.tsinghua.edu.cn/packages/7f/9c/34f6962f9b9e9c71f6e5ed806e0d0ff03c9d1b0b2340088a0cf4bce09b18/flask-3.1.3-py3-none-any.whl (from -r c:\Users\Bart\Documents\trae_projects\stockfilter\requirements.txt (line 1)) because of HTTP error 403 Client Error: Forbidden for url: https://pypi.tuna.tsinghua.edu.cn/packages/7f/9c/34f6962f9b9e9c71f6e5ed806e0d0ff03c9d1b0b2340088a0cf4bce09b18/flask-3.1.3-py3-none-any.whl for URL https://pypi.tuna.tsinghua.edu.cn/packages/7f/9c/34f6962f9b9e9c71f6e5ed806e0d0ff03c9d1b0b2340088a0cf4bce09b18/flask-3.1.3-py3-none-any.whl (from https://pypi.tuna.tsinghua.edu.cn/simple/flask/) (requires-python:>=3.9)
+  requirements install exitcode=1 
+ 
+[6/6] Verifying streamlit inside venv 
+c:\Users\Bart\Documents\trae_projects\stockfilter\.venv\Scripts\python.exe: No module named streamlit
+  streamlit verify exitcode=1 
+ 
+====================================================== 
+  DONE. Final requirements exitcode=1 
+====================================================== 

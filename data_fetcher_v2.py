@@ -33,26 +33,69 @@ for _ek in ("TMP", "TEMP", "TMPDIR", "SQLITE_TMPDIR"):
         os.environ[_ek] = str(_TEMP_DIR_GUARD)
     except Exception:
         pass
-# 修复 HOME/USERPROFILE（兜底尝试）
+# 修复 HOME/USERPROFILE（兜底尝试，仅 Windows 下硬编码旧路径尝试，Linux/macOS 完全不碰 Windows 路径）
+_IS_WIN = sys.platform.startswith("win")
 for _ek in ("USERPROFILE", "HOME"):
     _ev = os.environ.get(_ek) or ""
     if not _ev or "system32" in _ev.lower() or "systemprofile" in _ev.lower():
-        _guess = Path("C:/Users/Bart")
-        if _guess.exists():
-            os.environ[_ek] = str(_guess)
-# Tushare token 兜底
-if not os.environ.get("TUSHARE_TOKEN"):
-    for _tp in [Path("C:/Users/Bart/.tushare/token.txt"),
-                Path(os.environ.get("USERPROFILE", "")) / ".tushare" / "token.txt"
-                if os.environ.get("USERPROFILE") else None]:
-        if _tp and _tp.exists():
+        if _IS_WIN:
             try:
-                _tk = _tp.read_text(encoding="utf-8").strip()
-                if _tk:
-                    os.environ["TUSHARE_TOKEN"] = _tk
-                    break
+                import getpass as _gp
+                _u = _gp.getuser()
+                if _u:
+                    _g1 = Path(f"C:/Users/{_u}")
+                    if _g1.exists():
+                        os.environ[_ek] = str(_g1)
+                        continue
             except Exception:
-                continue
+                pass
+            _g2 = Path("C:/Users/Bart")
+            if _g2.exists():
+                os.environ[_ek] = str(_g2)
+# Tushare token 兜底：优先级 = Streamlit Secrets > 环境变量 > Path.home 下 token.txt > Windows 专属候选
+if not os.environ.get("TUSHARE_TOKEN"):
+    # 1) 尝试 Streamlit Cloud Secrets（非 Streamlit 环境会 import 失败/抛 KeyError → try/except 吞）
+    try:
+        import streamlit as _st
+        _st_tk = _st.secrets.get("tushare_token") if hasattr(_st, "secrets") else None
+        if _st_tk and str(_st_tk).strip():
+            os.environ["TUSHARE_TOKEN"] = str(_st_tk).strip()
+    except Exception:
+        pass
+if not os.environ.get("TUSHARE_TOKEN"):
+    # 2) Path.home() 跨平台查找
+    try:
+        _hp = Path.home() / ".tushare" / "token.txt"
+        if _hp.exists():
+            _tk = _hp.read_text(encoding="utf-8").strip()
+            if _tk:
+                os.environ["TUSHARE_TOKEN"] = _tk
+    except Exception:
+        pass
+if not os.environ.get("TUSHARE_TOKEN") and _IS_WIN:
+    # 3) Windows 专属候选（仅 Windows 才试，避免 Linux 下创建无意义 Path 对象）
+    try:
+        import getpass as _gp2
+        _win_cands = [Path("C:/Users/Bart/.tushare/token.txt")]
+        try:
+            _u2 = _gp2.getuser()
+            if _u2:
+                _win_cands.insert(0, Path(f"C:/Users/{_u2}/.tushare/token.txt"))
+        except Exception:
+            pass
+        if os.environ.get("USERPROFILE"):
+            _win_cands.append(Path(os.environ["USERPROFILE"]) / ".tushare" / "token.txt")
+        for _tp in _win_cands:
+            if _tp.exists():
+                try:
+                    _tk = _tp.read_text(encoding="utf-8").strip()
+                    if _tk:
+                        os.environ["TUSHARE_TOKEN"] = _tk
+                        break
+                except Exception:
+                    continue
+    except Exception:
+        pass
 # yfinance cache 环境变量
 for _ek in ("YF_CACHE_DIR", "YF_CACHE_PATH", "TZ_CACHE_PATH"):
     os.environ[_ek] = str(_TEMP_DIR_GUARD)
@@ -148,13 +191,38 @@ def _init_tushare():
         return True
     TUSHARE_TOKEN = (os.environ.get("TUSHARE_TOKEN") or "").strip()
     if not TUSHARE_TOKEN:
-        home_token = Path.home() / ".tushare" / "token.txt"
-        # 兜底：即便 Path.home() 被 DETACHED 进程改成了 system32，也硬尝试当前登录用户名 + 运行时已由 main.py 写入的 TUSHARE_TOKEN env
-        candidate_tokens = [
-            home_token,
-            Path("C:/Users/Bart/.tushare/token.txt"),
-            Path(os.environ.get("USERPROFILE", "")) / ".tushare" / "token.txt" if os.environ.get("USERPROFILE") else None,
-        ]
+        # A. Streamlit Cloud Secrets 优先（云端部署用）
+        try:
+            import streamlit as _st
+            if hasattr(_st, "secrets"):
+                _st_tk = _st.secrets.get("tushare_token")
+                if _st_tk and str(_st_tk).strip():
+                    TUSHARE_TOKEN = str(_st_tk).strip()
+        except Exception:
+            pass
+    if not TUSHARE_TOKEN:
+        # B. Path.home() 跨平台（Linux: /home/appuser, macOS: /Users/xxx, Win: C:\Users\xxx）
+        try:
+            _hp = Path.home() / ".tushare" / "token.txt"
+            if _hp.exists():
+                _c = _hp.read_text(encoding="utf-8").strip()
+                if _c:
+                    TUSHARE_TOKEN = _c
+        except Exception:
+            pass
+    if not TUSHARE_TOKEN and _IS_WIN:
+        # C. Windows 专属兜底（包含当前用户名 + 旧的 Bart 硬编码路径，仅 Windows 才试）
+        candidate_tokens = []
+        try:
+            import getpass as _gp
+            _u = _gp.getuser()
+            if _u:
+                candidate_tokens.append(Path(f"C:/Users/{_u}/.tushare/token.txt"))
+        except Exception:
+            pass
+        candidate_tokens.append(Path("C:/Users/Bart/.tushare/token.txt"))
+        if os.environ.get("USERPROFILE"):
+            candidate_tokens.append(Path(os.environ["USERPROFILE"]) / ".tushare" / "token.txt")
         for p in candidate_tokens:
             if p and p.exists():
                 try:
@@ -168,10 +236,7 @@ def _init_tushare():
         logger.info("未检测到 TUSHARE_TOKEN，A/H 股将走 Yahoo Finance 兜底")
         return False
     try:
-        # 【关键】tushare 库内部/导入时/pro_api() 可能尝试写 HOME/tk.csv 或 HOME/.tushare/
-        # 下的文件，DETACHED 进程安全令牌下 C:\Users\Bart 根目录可能 Permission denied。
-        # 这里临时把 HOME/USERPROFILE 切到项目 data_cache/tushare/（可写），
-        # import + pro_api() 完成后再还原（或者干脆不还原——之后读 token 都靠 env + 兜底路径）。
+        # 临时 HOME 切到 data_cache/tushare（保证任何平台都可写，避免 tushare 内部写 HOME 路径 Permission denied）
         _ts_home = (_BASE_DIR / "data_cache" / "tushare")
         _ts_home.mkdir(parents=True, exist_ok=True)
         (_ts_home / ".tushare").mkdir(exist_ok=True)
@@ -184,7 +249,6 @@ def _init_tushare():
             ts.set_token(TUSHARE_TOKEN)
             _ts_pro = ts.pro_api()
         finally:
-            # 还原，避免影响后续其他库（例如 Path.home() 的后续使用）
             if _old_home is not None:
                 os.environ["HOME"] = _old_home
             else:

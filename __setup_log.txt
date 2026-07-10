@@ -1,0 +1,13 @@
+=== Python probe === 
+The system cannot find the path specified.
+ 
+=== pip --version === 
+The system cannot find the path specified.
+ 
+=== Upgrading pip === 
+The system cannot find the path specified.
+ 
+=== Install requirements === 
+The system cannot find the path specified.
+ 
+=== DONE, exitcode=3 === 

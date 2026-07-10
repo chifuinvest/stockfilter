@@ -1,0 +1,55 @@
+=== LOCALAPPDATA Programs Python directory === 
+C:\Users\Bart\AppData\Local\Programs\Python\Python314\python.exe
+ 
+=== LOCALAPPDATA Programs Python subdirs === 
+Launcher
+Python314
+ 
+=== C:\Program Files dirs starting with P (Python, etc) === 
+Adobe
+AMD
+CMB
+Common Files
+eudic
+GitHub CLI
+HPPrintScanDoctor
+Internet Explorer
+Ledger Live
+Lenovo
+Microsoft
+Microsoft Office
+Microsoft Office 15
+Microsoft OfficePLUS
+Microsoft OneDrive
+Microsoft Update Health Tools
+ModifiableWindowsApps
+nodejs
+Tencent
+Windows Defender
+Windows Mail
+Windows Media Player
+Windows NT
+Windows Photo Viewer
+WindowsPowerShell
+WinRAR
+ 
+=== Direct call with quoted path test === 
+py.exe FOUND: C:\Users\Bart\AppData\Local\Programs\Python\Launcher\py.exe 
+Python 3.14.4
+No suitable Python runtime found
+Pass --list (-0) to see all detected environments on your machine
+or set environment variable PYLAUNCHER_ALLOW_INSTALL to use winget
+or open the Microsoft Store to the requested version.
+No suitable Python runtime found
+Pass --list (-0) to see all detected environments on your machine
+or set environment variable PYLAUNCHER_ALLOW_INSTALL to use winget
+or open the Microsoft Store to the requested version.
+No suitable Python runtime found
+Pass --list (-0) to see all detected environments on your machine
+or set environment variable PYLAUNCHER_ALLOW_INSTALL to use winget
+or open the Microsoft Store to the requested version.
+ 
+=== where pythonw.exe py.exe === 
+INFO: Could not find files for the given pattern(s).
+INFO: Could not find files for the given pattern(s).
+--- DONE --- 

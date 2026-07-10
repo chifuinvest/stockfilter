@@ -1,0 +1,14 @@
+﻿[16:25:24] [1/4] Download OK, 25 MB
+[16:25:24] [2/4] Running installer /quiet (PrependPath=1, pip=1, launcher=1, no test/doc/tcltk)
+[20:09:40] [2/4] Installer exit code: 0
+[20:09:40] [3/4] Refreshing PATH in current session...
+[20:09:41] [3/4] PATH refreshed, length=449
+[20:09:41]    candidate C:\Users\Bart\AppData\Local\Programs\Python\Python311\python.exe -> False
+[20:09:41]    candidate C:\Users\Bart\AppData\Roaming\Programs\Python\Python311\python.exe -> False
+[20:09:41]    candidate C:\Program Files\Python311\python.exe -> False
+[20:09:41]    candidate C:\Program Files (x86)\Python311\python.exe -> False
+[20:09:41] [4/4] where.exe python: C:\Users\Bart\AppData\Local\Programs\Python\Python314\python.exe C:\Users\Bart\AppData\Local\Microsoft\WindowsApps\python.exe
+[20:09:41] [4/4] 鉁?FOUND Python: C:\Users\Bart\AppData\Local\Programs\Python\Python314\python.exe
+[20:09:41]    version: Python 3.14.4
+[20:09:44]    pip: pip 26.0.1 from C:\Users\Bart\AppData\Local\Programs\Python\Python314\Lib\site-packages\pip (python 3.14) 
+[20:09:44] [4/4] 鉁?All done! Close & reopen PowerShell to use 'python' command directly.

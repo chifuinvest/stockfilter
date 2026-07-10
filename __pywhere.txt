@@ -1,0 +1,23 @@
+Scanning Python install locations... 
+ 
+FOUND: C:\Program Files\Python311\python.exe 
+MISS:  C:\Program Files\Python311\python.exe 
+FOUND: C:\Program Files (x86)\Python311\python.exe 
+MISS:  C:\Program Files (x86)\Python311\python.exe 
+MISS:  C:\Users\Bart\AppData\Local\Programs\Python\Python311\python.exe 
+MISS:  C:\Users\Bart\AppData\Roaming\Programs\Python\Python311\python.exe 
+MISS:  C:\Python311\python.exe 
+FOUND: C:\Program Files\Python312\python.exe 
+MISS:  C:\Program Files\Python312\python.exe 
+MISS:  C:\Users\Bart\AppData\Local\Programs\Python\Python312\python.exe 
+MISS:  C:\Users\Bart\AppData\Local\Programs\Python\Python310\python.exe 
+FOUND: C:\Program Files\Python39\python.exe 
+MISS:  C:\Program Files\Python39\python.exe 
+MISS:  C:\Users\Bart\AppData\Local\Programs\Python\Python39\python.exe 
+ 
+FINAL_SELECTED=C:\Program Files\Python311\python.exe 
+ 
+[Probe version] 
+The system cannot find the path specified.
+The system cannot find the path specified.
+--- DONE --- 
