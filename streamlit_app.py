@@ -595,7 +595,10 @@ else:
             "环节": r.get("sector", "其他"),
             "总分": round(float(r.get("total_score") or 0), 2),
             "信号": SIGNAL_LABEL.get((r.get("signal") or "").upper(), r.get("signal", "")),
-            "涨跌幅%": round(float(r.get("pct_change") or 0), 2),
+            "24h%": round(float(r.get("pct_1d") if r.get("pct_1d") is not None else (r.get("pct_change") or 0)), 2),
+            "7日%": round(float(r.get("pct_7d") or 0), 2),
+            "30日%": round(float(r.get("pct_30d") or 0), 2),
+            "12月%": round(float(r.get("pct_1y") or 0), 2),
             "MA 得分": round(float(r.get("ma_score") or 0), 1),
             "MACD 得分": round(float(r.get("macd_score") or 0), 1),
             "RSI 得分": round(float(r.get("rsi_score") or 0), 1),
@@ -628,7 +631,7 @@ else:
 
         df_display = df.drop(columns=["signal_key"]).copy()
         df_style = df_display.style.apply(_row_color, axis=1)
-        df_style = df_style.map(_pct_color, subset=["涨跌幅%"])
+        df_style = df_style.map(_pct_color, subset=["24h%", "7日%", "30日%", "12月%"])
 
         st.dataframe(
             df_style,
@@ -641,7 +644,10 @@ else:
                 "环节": st.column_config.Column("环节", width="medium"),
                 "总分": st.column_config.NumberColumn("总分 ⭐", min_value=0, max_value=100, format="%.1f", width="small"),
                 "信号": st.column_config.Column("信号", width="small"),
-                "涨跌幅%": st.column_config.NumberColumn("涨跌%", format="%.2f%%", width="small"),
+                "24h%": st.column_config.NumberColumn("24h%", format="%.2f%%", width="small"),
+                "7日%": st.column_config.NumberColumn("7日%", format="%.2f%%", width="small"),
+                "30日%": st.column_config.NumberColumn("30日%", format="%.2f%%", width="small"),
+                "12月%": st.column_config.NumberColumn("12月%", format="%.2f%%", width="small"),
                 "MA 得分": st.column_config.NumberColumn("MA", format="%.0f", width="small"),
                 "MACD 得分": st.column_config.NumberColumn("MACD", format="%.0f", width="small"),
                 "RSI 得分": st.column_config.NumberColumn("RSI", format="%.0f", width="small"),
